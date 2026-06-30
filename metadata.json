@@ -1,0 +1,7 @@
+{
+  "name": "Expense Tracker Platform",
+  "description": "A Splitwise-style expense tracker with real-time dashboards, shared groups, itemized expense logs, currency conversion, role-based invites, and an admin management panel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

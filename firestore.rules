@@ -1,0 +1,66 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper to validate generic string ID formats
+    function isValidId(id) {
+      return id is string && id.size() <= 128;
+    }
+
+    // Helpers to validate incoming entity schemas to protect database integrity
+    function isValidUser(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.email is string && data.email.size() <= 128
+        && data.name is string && data.name.size() <= 128
+        && (data.role == 'admin' || data.role == 'manager' || data.role == 'member')
+        && data.createdAt is string;
+    }
+
+    function isValidGroup(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 256
+        && data.description is string && data.description.size() <= 2000
+        && data.currency is string && data.currency.size() <= 10
+        && data.members is list
+        && data.memberRoles is map
+        && data.createdAt is string
+        && (data.totalExpense is number || data.totalExpense is int);
+    }
+
+    function isValidExpense(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.groupId is string && data.groupId.size() <= 128
+        && data.description is string && data.description.size() <= 2000
+        && (data.amount is number || data.amount is int)
+        && data.currency is string && data.currency.size() <= 10
+        && data.date is string
+        && data.paidBy is string && data.paidBy.size() <= 128
+        && (data.splitMethod == 'equal' || data.splitMethod == 'exact' || data.splitMethod == 'shares')
+        && data.splits is list
+        && data.category is string && data.category.size() <= 128
+        && data.createdAt is string;
+    }
+
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update: if isValidId(userId) && isValidUser(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /groups/{groupId} {
+      allow read: if true;
+      allow create, update: if isValidId(groupId) && isValidGroup(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /expenses/{expenseId} {
+      allow read: if true;
+      allow create, update: if isValidId(expenseId) && isValidExpense(request.resource.data);
+      allow delete: if true;
+    }
+  }
+}
