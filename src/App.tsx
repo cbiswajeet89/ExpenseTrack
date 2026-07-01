@@ -856,37 +856,39 @@ export default function App() {
               </ul>
             </div>
 
-            <div>
-              <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold mb-3.5 block">Administration</span>
-              <ul className="space-y-1.5">
-                <li>
-                  <button
-                    onClick={() => setActiveTab('admin')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
-                      activeTab === 'admin'
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                        : 'hover:bg-slate-800 hover:text-white text-slate-400'
-                    }`}
-                  >
-                    <Shield className="w-4 h-4" />
-                    <span>Admin Panel</span>
-                  </button>
-                </li>
-                <li>
-                  <button
-                    onClick={() => setActiveTab('reference')}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
-                      activeTab === 'reference'
-                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
-                        : 'hover:bg-slate-800 hover:text-white text-slate-400'
-                    }`}
-                  >
-                    <Code2 className="w-4 h-4" />
-                    <span>Export Tech Stack</span>
-                  </button>
-                </li>
-              </ul>
-            </div>
+            {currentUser?.role === 'admin' && (
+              <div>
+                <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold mb-3.5 block">Administration</span>
+                <ul className="space-y-1.5">
+                  <li>
+                    <button
+                      onClick={() => setActiveTab('admin')}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
+                        activeTab === 'admin'
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                          : 'hover:bg-slate-800 hover:text-white text-slate-400'
+                      }`}
+                    >
+                      <Shield className="w-4 h-4" />
+                      <span>Admin Panel</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      onClick={() => setActiveTab('reference')}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
+                        activeTab === 'reference'
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                          : 'hover:bg-slate-800 hover:text-white text-slate-400'
+                      }`}
+                    >
+                      <Code2 className="w-4 h-4" />
+                      <span>Export Tech Stack</span>
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            )}
           </nav>
         </div>
 
@@ -937,20 +939,24 @@ export default function App() {
           <UserCheck className="w-4.5 h-4.5" />
           <span className="text-[9px]">Profile</span>
         </button>
-        <button
-          onClick={() => setActiveTab('admin')}
-          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'admin' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
-        >
-          <Shield className="w-4.5 h-4.5" />
-          <span className="text-[9px]">Admin</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('reference')}
-          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'reference' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
-        >
-          <Code2 className="w-4.5 h-4.5" />
-          <span className="text-[9px]">Export</span>
-        </button>
+        {currentUser?.role === 'admin' && (
+          <>
+            <button
+              onClick={() => setActiveTab('admin')}
+              className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'admin' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
+            >
+              <Shield className="w-4.5 h-4.5" />
+              <span className="text-[9px]">Admin</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('reference')}
+              className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'reference' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
+            >
+              <Code2 className="w-4.5 h-4.5" />
+              <span className="text-[9px]">Export</span>
+            </button>
+          </>
+        )}
       </nav>
 
       {/* PRIMARY WORKSPACE CONTENT */}
@@ -1045,7 +1051,7 @@ export default function App() {
             </div>
           )}
 
-          {activeTab === 'admin' && (
+          {activeTab === 'admin' && currentUser?.role === 'admin' && (
             <AdminPanel
               currentUser={currentUser}
               jwtToken={jwtToken}
@@ -1064,7 +1070,7 @@ export default function App() {
             />
           )}
 
-          {activeTab === 'reference' && (
+          {activeTab === 'reference' && currentUser?.role === 'admin' && (
             <ReferenceViewer />
           )}
 
