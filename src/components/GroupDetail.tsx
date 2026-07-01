@@ -747,8 +747,8 @@ export default function GroupDetail({
                         }
                       }}
                       title={isSelf && isTargetAdmin ? "You cannot remove yourself" : `Remove ${gu.name} from group`}
-                      className={`p-1.5 rounded-lg transition border border-gray-100 bg-white shadow-xs opacity-0 group-hover/member:opacity-100 hover:bg-rose-50 hover:text-rose-600 cursor-pointer ${
-                        isSelf && isTargetAdmin ? 'hidden' : 'text-gray-450'
+                      className={`p-1.5 rounded-lg transition border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-500 dark:text-rose-400 hover:text-rose-600 cursor-pointer ${
+                        isSelf && isTargetAdmin ? 'hidden' : ''
                       }`}
                     >
                       <UserMinus className="w-3.5 h-3.5" />

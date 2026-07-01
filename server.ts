@@ -10,7 +10,7 @@ import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { referenceTemplates } from './src/lib/referenceTemplates.js';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, setDoc, getDoc, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, updateDoc, query, where, deleteDoc } from 'firebase/firestore';
 import fs from 'fs';
 import crypto from 'crypto';
 
@@ -675,6 +675,73 @@ app.put('/api/admin/users/:id/role', authenticateJWT, authorizeAdmin, (req: Auth
       updatedAt: new Date().toISOString()
     }
   });
+});
+
+// 8.1 Secured Master Admin Endpoint: Delete User from Application
+app.delete('/api/admin/users/:id', authenticateJWT, authorizeAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    const groupsSnap = await getDocs(collection(db, 'groups'));
+    const allGroups: any[] = [];
+    groupsSnap.forEach(d => {
+      allGroups.push({ id: d.id, ...d.data() });
+    });
+
+    const userGroups = allGroups.filter(g => g.members && g.members.includes(id));
+
+    const expensesSnap = await getDocs(collection(db, 'expenses'));
+    const allExpenses: any[] = [];
+    expensesSnap.forEach(d => {
+      allExpenses.push(d.data());
+    });
+
+    for (const group of userGroups) {
+      let balance = 0;
+      const groupExpenses = allExpenses.filter(e => e.groupId === group.id);
+      
+      groupExpenses.forEach(exp => {
+        if (exp.paidBy === id) {
+          balance += Number(exp.amount);
+        }
+        if (exp.splits) {
+          const userSplit = exp.splits.find((s: any) => s.userId === id);
+          if (userSplit) {
+            balance -= Number(userSplit.amount);
+          }
+        }
+      });
+
+      if (Math.abs(balance) >= 0.01) {
+        res.status(400).json({
+          error: `Cannot remove user from application: they have an unsettled balance of ${group.currency} ${balance.toFixed(2)} in group "${group.name}". Please settle all group dues before removal.`
+        });
+        return;
+      }
+    }
+
+    // Remove user from all groups they belong to
+    for (const group of userGroups) {
+      const updatedMembers = group.members.filter((m: any) => m !== id);
+      const updatedRoles = { ...group.memberRoles };
+      delete updatedRoles[id];
+      await updateDoc(doc(db, 'groups', group.id), {
+        members: updatedMembers,
+        memberRoles: updatedRoles
+      });
+    }
+
+    // Delete user document from Firestore
+    await deleteDoc(doc(db, 'users', id));
+
+    res.json({
+      success: true,
+      message: `User ${id} has been permanently deleted from the application database.`
+    });
+  } catch (err: any) {
+    console.error('[Admin Delete User Error]:', err);
+    res.status(500).json({ error: 'Failed to delete user.' });
+  }
 });
 
 // 9. Reference Code Endpoint

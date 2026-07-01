@@ -389,3 +389,60 @@ export async function removeMemberFromGroup(groupId: string, userId: string): Pr
   }
 }
 
+export async function removeUserFromApp(userId: string): Promise<void> {
+  // 1. Get all groups
+  const groupsSnap = await getDocs(collection(db, 'groups'));
+  const allGroups: Group[] = [];
+  groupsSnap.forEach(d => {
+    allGroups.push(d.data() as Group);
+  });
+
+  // Filter groups where user is a member
+  const userGroups = allGroups.filter(g => g.members.includes(userId));
+
+  // 2. Fetch all expenses in the system
+  const expensesSnap = await getDocs(collection(db, 'expenses'));
+  const allExpenses: Expense[] = [];
+  expensesSnap.forEach(d => {
+    allExpenses.push(d.data() as Expense);
+  });
+
+  // Calculate balances for the user in all groups they belong to
+  for (const group of userGroups) {
+    let balance = 0;
+    const groupExpenses = allExpenses.filter(e => e.groupId === group.id);
+    
+    groupExpenses.forEach(exp => {
+      if (exp.paidBy === userId) {
+        balance += Number(exp.amount);
+      }
+      if (exp.splits) {
+        const userSplit = exp.splits.find(s => s.userId === userId);
+        if (userSplit) {
+          balance -= Number(userSplit.amount);
+        }
+      }
+    });
+
+    // If there is any non-zero balance, block deletion
+    if (Math.abs(balance) >= 0.01) {
+      throw new Error(`Cannot remove user: they have an outstanding, unsettled balance of ${group.currency} ${balance.toFixed(2)} in group "${group.name}". Please settle all group dues before removing.`);
+    }
+  }
+
+  // 3. Remove the user from all groups they belong to
+  for (const group of userGroups) {
+    const updatedMembers = group.members.filter(m => m !== userId);
+    const updatedRoles = { ...group.memberRoles };
+    delete updatedRoles[userId];
+    await updateDoc(doc(db, 'groups', group.id), {
+      members: updatedMembers,
+      memberRoles: updatedRoles
+    });
+  }
+
+  // 4. Delete the user document from 'users' collection
+  await deleteDoc(doc(db, 'users', userId));
+}
+
+

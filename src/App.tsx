@@ -19,7 +19,8 @@ import {
   updateExpenseInDb,
   updateGroupInDb,
   deleteGroupFromDb,
-  removeMemberFromGroup
+  removeMemberFromGroup,
+  removeUserFromApp
 } from './lib/dbHelper.js';
 
 // Sub-components
@@ -317,6 +318,34 @@ export default function App() {
       await removeMemberFromGroup(groupId, userId);
       setGroups(prev => prev.map(g => {
         if (g.id === groupId) {
+          const updatedMembers = g.members.filter(m => m !== userId);
+          const updatedRoles = { ...g.memberRoles };
+          delete updatedRoles[userId];
+          return {
+            ...g,
+            members: updatedMembers,
+            memberRoles: updatedRoles
+          };
+        }
+        return g;
+      }));
+    } catch (err) {
+      console.error(err);
+      throw err;
+    }
+  };
+
+  // Remove user from the entire application (Admin Action)
+  const handleRemoveUserFromApp = async (userId: string) => {
+    try {
+      await removeUserFromApp(userId);
+      
+      // Update local users list state
+      setUsers(prev => prev.filter(u => u.id !== userId));
+      
+      // Update local groups state to remove them from all memberships
+      setGroups(prev => prev.map(g => {
+        if (g.members.includes(userId)) {
           const updatedMembers = g.members.filter(m => m !== userId);
           const updatedRoles = { ...g.memberRoles };
           delete updatedRoles[userId];
@@ -832,7 +861,7 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         
         {/* DESKTOP HEADER */}
-        <header className="hidden md:flex h-16 border-b border-slate-200 dark:border-slate-850 bg-white dark:bg-slate-900 px-8 items-center justify-between shadow-sm z-10 shrink-0">
+        <header className="hidden md:flex h-16 border-b border-slate-200 dark:border-slate-850 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs px-8 items-center justify-between shadow-sm sticky top-0 z-30 shrink-0">
           <div className="flex items-center gap-4">
             <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight uppercase">
               {activeTab === 'dashboard' && 'Dashboard Overview'}
@@ -927,6 +956,7 @@ export default function App() {
               users={users}
               groups={groups}
               onUpdateUserRole={handleUpdateUserRole}
+              onRemoveUserFromApp={handleRemoveUserFromApp}
             />
           )}
 
