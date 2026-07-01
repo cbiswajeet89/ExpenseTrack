@@ -35,6 +35,7 @@ import AdminPanel from './components/AdminPanel.js';
 import ReferenceViewer from './components/ReferenceViewer.js';
 import ProfileSettings from './components/ProfileSettings.js';
 import ConfirmDialog from './components/ConfirmDialog.js';
+import MasterDataPanel from './components/MasterDataPanel.js';
 
 // Icons
 import { 
@@ -50,7 +51,8 @@ import {
   UserCheck,
   Sun,
   Moon,
-  Grid
+  Grid,
+  Database
 } from 'lucide-react';
 
 export default function App() {
@@ -79,7 +81,8 @@ export default function App() {
   });
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'groups' | 'matrix' | 'admin' | 'reference' | 'profile'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'groups' | 'matrix' | 'admin' | 'reference' | 'profile' | 'master_data'>('dashboard');
+  const [impersonatedUser, setImpersonatedUser] = useState<User | null>(null);
   
   // App initialization states
   const [loading, setLoading] = useState(true);
@@ -215,9 +218,13 @@ export default function App() {
     });
 
     // Subscribe to groups (either all for admin, or where user is member)
-    const groupsQuery = currentUser.role === 'admin'
+    const activeUserId = impersonatedUser ? impersonatedUser.id : currentUser.id;
+    const activeUserRole = impersonatedUser ? impersonatedUser.role : currentUser.role;
+    const activeUserEmail = impersonatedUser ? impersonatedUser.email : currentUser.email;
+
+    const groupsQuery = (activeUserRole === 'admin' && activeUserEmail === 'admin@example.com')
       ? collection(db, 'groups')
-      : query(collection(db, 'groups'), where('members', 'array-contains', currentUser.id));
+      : query(collection(db, 'groups'), where('members', 'array-contains', activeUserId));
 
     const unsubscribeGroups = onSnapshot(groupsQuery, (snapshot) => {
       const list: Group[] = [];
@@ -247,7 +254,7 @@ export default function App() {
       unsubscribeUsers();
       unsubscribeGroups();
     };
-  }, [currentUser]);
+  }, [currentUser, impersonatedUser]);
 
   // Real-time synchronization for active group's expense logs
   useEffect(() => {
@@ -277,6 +284,63 @@ export default function App() {
       unsubscribeExpenses();
     };
   }, [currentUser, selectedGroupId]);
+
+  const [categoriesList, setCategoriesList] = useState<string[]>([]);
+
+  // Real-time synchronization for categories
+  useEffect(() => {
+    const unsubscribeCats = onSnapshot(collection(db, 'categories'), (snapshot) => {
+      const list: string[] = [];
+      snapshot.forEach(d => {
+        const data = d.data();
+        if (data && data.name) {
+          list.push(data.name);
+        }
+      });
+      if (list.length === 0) {
+        setCategoriesList([
+          'Food & Groceries',
+          'Utilities & Bills',
+          'Rent & Lodging',
+          'Household',
+          'Entertainment & Leisure',
+          'Travel & Transport',
+          'Other'
+        ]);
+      } else {
+        list.sort();
+        setCategoriesList(list);
+      }
+    }, (error) => {
+      console.error('Real-time sync error for categories:', error);
+    });
+
+    return () => {
+      unsubscribeCats();
+    };
+  }, []);
+
+  // Real-time synchronization for exchange rates
+  useEffect(() => {
+    const unsubscribeRates = onSnapshot(collection(db, 'exchangeRates'), (snapshot) => {
+      const ratesMap: { [key: string]: number } = {};
+      snapshot.forEach(d => {
+        const rateObj = d.data() as { code: string; rate: number };
+        if (rateObj.code && rateObj.rate) {
+          ratesMap[rateObj.code] = Number(rateObj.rate);
+        }
+      });
+      if (Object.keys(ratesMap).length > 0) {
+        setCurrencyRates(ratesMap);
+      }
+    }, (error) => {
+      console.error('Real-time sync error for exchange rates:', error);
+    });
+
+    return () => {
+      unsubscribeRates();
+    };
+  }, []);
 
   const handleAuthSuccess = (user: User, token: string, refreshToken: string) => {
     setCurrentUser(user);
@@ -826,7 +890,7 @@ export default function App() {
               </ul>
             </div>
 
-            {currentUser?.role === 'admin' && (
+            {currentUser?.email === 'admin@example.com' && (
               <div>
                 <span className="text-[9px] uppercase tracking-widest text-slate-500 font-bold mb-3.5 block">Administration</span>
                 <ul className="space-y-1.5">
@@ -841,6 +905,19 @@ export default function App() {
                     >
                       <Shield className="w-4 h-4" />
                       <span>Admin Panel</span>
+                    </button>
+                  </li>
+                  <li>
+                    <button
+                      onClick={() => setActiveTab('master_data')}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
+                        activeTab === 'master_data'
+                          ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                          : 'hover:bg-slate-800 hover:text-white text-slate-400'
+                      }`}
+                    >
+                      <Database className="w-4 h-4" />
+                      <span>Master Data Management</span>
                     </button>
                   </li>
                   <li>
@@ -916,7 +993,7 @@ export default function App() {
           <UserCheck className="w-4.5 h-4.5" />
           <span className="text-[9px]">Profile</span>
         </button>
-        {currentUser?.role === 'admin' && (
+        {currentUser?.email === 'admin@example.com' && (
           <>
             <button
               onClick={() => setActiveTab('admin')}
@@ -924,6 +1001,13 @@ export default function App() {
             >
               <Shield className="w-4.5 h-4.5" />
               <span className="text-[9px]">Admin</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('master_data')}
+              className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'master_data' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
+            >
+              <Database className="w-4.5 h-4.5" />
+              <span className="text-[9px]">Master Data</span>
             </button>
             <button
               onClick={() => setActiveTab('reference')}
@@ -948,6 +1032,7 @@ export default function App() {
               {activeTab === 'matrix' && 'Settlement Matrix'}
               {activeTab === 'profile' && 'My Account Profile'}
               {activeTab === 'admin' && 'Master Administration'}
+              {activeTab === 'master_data' && 'Master Data Terminal'}
               {activeTab === 'reference' && 'Export Tech Stack'}
             </h2>
             <div className="h-4 w-px bg-slate-300 dark:bg-slate-700"></div>
@@ -977,6 +1062,25 @@ export default function App() {
           </div>
         </header>
 
+        {impersonatedUser && (
+          <div className="bg-amber-500 text-white px-6 py-2 flex items-center justify-between text-xs font-semibold shrink-0 shadow-md">
+            <div className="flex items-center gap-2">
+              <span className="bg-white text-amber-600 px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase animate-pulse">
+                Impersonation Active
+              </span>
+              <span>
+                Acting on behalf of: <strong className="underline">{impersonatedUser.name}</strong> ({impersonatedUser.email}) — Role: <span className="uppercase">{impersonatedUser.role}</span>
+              </span>
+            </div>
+            <button
+              onClick={() => setImpersonatedUser(null)}
+              className="bg-white/20 hover:bg-white/30 px-3 py-1 rounded-lg text-[10px] uppercase font-bold transition-all cursor-pointer border-0"
+            >
+              Exit Impersonation
+            </button>
+          </div>
+        )}
+
         <main className="flex-1 p-4 sm:p-6 md:p-8 space-y-6 pb-24 md:pb-8">
           
           {activeTab === 'dashboard' && (
@@ -984,10 +1088,11 @@ export default function App() {
               groups={groups}
               expenses={expenses}
               users={users}
-              currentUserId={currentUser.id}
+              currentUserId={impersonatedUser ? impersonatedUser.id : currentUser.id}
               currencyRates={currencyRates}
               onUpdateExpense={handleUpdateExpense}
               onDeleteExpense={handleDeleteExpense}
+              categories={categoriesList}
             />
           )}
 
@@ -1007,14 +1112,15 @@ export default function App() {
                     group={selectedGroup}
                     expenses={expenses}
                     users={users}
-                    currentUserId={currentUser.id}
-                    currentUserRole={currentUser.role}
+                    currentUserId={impersonatedUser ? impersonatedUser.id : currentUser.id}
+                    currentUserRole={impersonatedUser ? (selectedGroup.memberRoles[impersonatedUser.id] || 'member') : currentUser.role}
                     onAddExpense={handleAddExpense}
                     onDeleteExpense={handleDeleteExpense}
                     onUpdateExpense={handleUpdateExpense}
                     onUpdateGroup={handleUpdateGroup}
                     onDeleteGroup={handleDeleteGroup}
                     onRemoveMember={handleRemoveMember}
+                    categories={categoriesList}
                   />
                 ) : (
                   <div className="h-96 border border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center p-6 text-center bg-white shadow-sm">
@@ -1034,11 +1140,11 @@ export default function App() {
               groups={groups}
               expenses={expenses}
               users={users}
-              currentUserId={currentUser.id}
+              currentUserId={impersonatedUser ? impersonatedUser.id : currentUser.id}
             />
           )}
 
-          {activeTab === 'admin' && currentUser?.role === 'admin' && (
+          {activeTab === 'admin' && currentUser?.email === 'admin@example.com' && (
             <AdminPanel
               currentUser={currentUser}
               jwtToken={jwtToken}
@@ -1046,18 +1152,28 @@ export default function App() {
               groups={groups}
               onUpdateUserRole={handleUpdateUserRole}
               onRemoveUserFromApp={handleRemoveUserFromApp}
+              onImpersonateUser={(u) => {
+                setImpersonatedUser(u);
+                setActiveTab('dashboard');
+              }}
+            />
+          )}
+
+          {activeTab === 'master_data' && currentUser?.email === 'admin@example.com' && (
+            <MasterDataPanel
+              jwtToken={jwtToken}
             />
           )}
 
           {activeTab === 'profile' && (
             <ProfileSettings
-              currentUser={currentUser}
+              currentUser={impersonatedUser ? impersonatedUser : currentUser}
               jwtToken={jwtToken}
               onProfileUpdate={handleProfileUpdate}
             />
           )}
 
-          {activeTab === 'reference' && currentUser?.role === 'admin' && (
+          {activeTab === 'reference' && currentUser?.email === 'admin@example.com' && (
             <ReferenceViewer />
           )}
 

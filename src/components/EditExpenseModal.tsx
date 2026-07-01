@@ -15,6 +15,7 @@ interface EditExpenseModalProps {
   currency: string;
   onClose: () => void;
   onSave: (expenseId: string, updatedExpense: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => Promise<void>;
+  categories?: string[];
 }
 
 export default function EditExpenseModal({
@@ -23,7 +24,8 @@ export default function EditExpenseModal({
   groupMembers,
   currency,
   onClose,
-  onSave
+  onSave,
+  categories: propCategories
 }: EditExpenseModalProps) {
   // Filter users to only include group members
   const activeGroupUsers = users.filter(u => groupMembers.includes(u.id));
@@ -56,7 +58,7 @@ export default function EditExpenseModal({
   } | null>(null);
 
   // Categories
-  const categories = [
+  const categories = propCategories && propCategories.length > 0 ? propCategories : [
     'Food & Groceries',
     'Utilities & Bills',
     'Rent & Lodging',

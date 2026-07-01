@@ -50,6 +50,30 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "groupId", "description", "amount", "currency", "date", "paidBy", "splitMethod", "splits", "category", "createdAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Master spending category used for logging expenses",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "ExchangeRate": {
+      "title": "ExchangeRate",
+      "description": "Master currency conversion rates referenced against USD",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "rate": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "code", "rate"]
     }
   },
   "firestore": {
@@ -64,6 +88,14 @@
     "expenses/{expenseId}": {
       "schema": "Expense",
       "description": "Collection of itemized expense transactions"
+    },
+    "categories/{catId}": {
+      "schema": "Category",
+      "description": "Collection of master spending categories"
+    },
+    "exchangeRates/{rateId}": {
+      "schema": "ExchangeRate",
+      "description": "Collection of master currency exchange rates"
     }
   }
 }

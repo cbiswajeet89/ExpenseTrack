@@ -20,116 +20,154 @@ import { User, Group, Expense, Invite, UserRole } from '../types.js';
 
 // Default mock users list to seed Firestore
 export const DEFAULT_USERS: User[] = [
-  { id: 'usr_alice', email: 'alice@example.com', name: 'Alice Smith', role: 'admin', createdAt: new Date().toISOString() },
+  { id: 'usr_alice', email: 'alice@example.com', name: 'Alice Smith', role: 'manager', createdAt: new Date().toISOString() },
   { id: 'usr_bob', email: 'bob@example.com', name: 'Bob Johnson', role: 'manager', createdAt: new Date().toISOString() },
   { id: 'usr_charlie', email: 'charlie@example.com', name: 'Charlie Davis', role: 'member', createdAt: new Date().toISOString() },
-  { id: 'usr_admin', email: 'cbiswajeet89@gmail.com', name: 'Biswajeet Admin', role: 'admin', createdAt: new Date().toISOString() }
+  { id: 'usr_admin_default', email: 'admin@example.com', name: 'Master Admin', role: 'admin', createdAt: new Date().toISOString() },
+  { id: 'usr_admin', email: 'cbiswajeet89@gmail.com', name: 'Biswajeet Manager', role: 'manager', createdAt: new Date().toISOString() }
 ];
 
 // Helper to seed Firestore if empty
 export async function seedDatabaseIfEmpty() {
   try {
     const usersSnap = await getDocs(collection(db, 'users'));
-    if (!usersSnap.empty) {
-      console.log('[Firestore] Database already contains data. Skipping seeding.');
-      return;
-    }
-
-    console.log('[Firestore] Database is empty. Seeding starting data...');
-
-    // 1. Seed Users
-    for (const u of DEFAULT_USERS) {
-      await setDoc(doc(db, 'users', u.id), u);
-    }
-
-    // 2. Seed a sample Group
-    const sampleGroup: Group = {
-      id: 'grp_apartment_3b',
-      name: 'Apartment 3B Roomies',
-      description: 'Shared flat utility bills, organic groceries, and cleaning supplies.',
-      currency: 'USD',
-      members: ['usr_alice', 'usr_bob', 'usr_charlie'],
-      memberRoles: {
-        usr_alice: 'admin',
-        usr_bob: 'manager',
-        usr_charlie: 'member'
-      },
-      createdAt: new Date().toISOString(),
-      totalExpense: 480.0
-    };
-    await setDoc(doc(db, 'groups', sampleGroup.id), sampleGroup);
-
-    // 3. Seed some initial itemized Expenses
-    const sampleExpenses: Expense[] = [
-      {
-        id: 'exp_grocery',
-        groupId: 'grp_apartment_3b',
-        description: 'Monthly Whole Foods Grocery Haul',
-        amount: 150.0,
-        currency: 'USD',
-        date: '2026-06-15',
-        paidBy: 'usr_alice',
-        splitMethod: 'equal',
-        splits: [
-          { userId: 'usr_alice', amount: 50.0 },
-          { userId: 'usr_bob', amount: 50.0 },
-          { userId: 'usr_charlie', amount: 50.0 }
-        ],
-        items: [
-          { id: 'it_1', description: 'Fresh produce & organic milk', amount: 90.0 },
-          { id: 'it_2', description: 'Gourmet cheese & crackers', amount: 60.0 }
-        ],
-        category: 'Food & Groceries',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'exp_electricity',
-        groupId: 'grp_apartment_3b',
-        description: 'AC Power & Electric Bill',
-        amount: 240.0,
-        currency: 'USD',
-        date: '2026-06-20',
-        paidBy: 'usr_bob',
-        splitMethod: 'exact',
-        splits: [
-          { userId: 'usr_alice', amount: 100.0 }, // Alice had bigger bedroom with extra AC
-          { userId: 'usr_bob', amount: 70.0 },
-          { userId: 'usr_charlie', amount: 70.0 }
-        ],
-        items: [
-          { id: 'it_e1', description: 'Standard utility usage charges', amount: 240.0 }
-        ],
-        category: 'Utilities & Bills',
-        createdAt: new Date().toISOString()
-      },
-      {
-        id: 'exp_cleaning',
-        groupId: 'grp_apartment_3b',
-        description: 'Flat Deep Cleaning Supplies',
-        amount: 90.0,
-        currency: 'USD',
-        date: '2026-06-25',
-        paidBy: 'usr_charlie',
-        splitMethod: 'shares',
-        splits: [
-          { userId: 'usr_alice', amount: 30.0, share: 1 },
-          { userId: 'usr_bob', amount: 30.0, share: 1 },
-          { userId: 'usr_charlie', amount: 30.0, share: 1 }
-        ],
-        items: [
-          { id: 'it_c1', description: 'Eco-friendly cleaning agents', amount: 50.0 },
-          { id: 'it_c2', description: 'Mop, broom & microfibre wipes', amount: 40.0 }
-        ],
-        category: 'Household',
-        createdAt: new Date().toISOString()
+    if (usersSnap.empty) {
+      console.log('[Firestore] Users collection is empty. Seeding starting users...');
+      for (const u of DEFAULT_USERS) {
+        await setDoc(doc(db, 'users', u.id), u);
       }
-    ];
-
-    for (const exp of sampleExpenses) {
-      await setDoc(doc(db, 'expenses', exp.id), exp);
     }
 
-    console.log('[Firestore] Seeding completed successfully!');
+    const groupsSnap = await getDocs(collection(db, 'groups'));
+    if (groupsSnap.empty) {
+      console.log('[Firestore] Groups collection is empty. Seeding starting groups...');
+      const sampleGroup: Group = {
+        id: 'grp_apartment_3b',
+        name: 'Apartment 3B Roomies',
+        description: 'Shared flat utility bills, organic groceries, and cleaning supplies.',
+        currency: 'USD',
+        members: ['usr_alice', 'usr_bob', 'usr_charlie'],
+        memberRoles: {
+          usr_alice: 'manager',
+          usr_bob: 'manager',
+          usr_charlie: 'member'
+        },
+        createdAt: new Date().toISOString(),
+        totalExpense: 480.0
+      };
+      await setDoc(doc(db, 'groups', sampleGroup.id), sampleGroup);
+    }
+
+    const expensesSnap = await getDocs(collection(db, 'expenses'));
+    if (expensesSnap.empty) {
+      console.log('[Firestore] Expenses collection is empty. Seeding starting expenses...');
+      const sampleExpenses: Expense[] = [
+        {
+          id: 'exp_grocery',
+          groupId: 'grp_apartment_3b',
+          description: 'Monthly Whole Foods Grocery Haul',
+          amount: 150.0,
+          currency: 'USD',
+          date: '2026-06-15',
+          paidBy: 'usr_alice',
+          splitMethod: 'equal',
+          splits: [
+            { userId: 'usr_alice', amount: 50.0 },
+            { userId: 'usr_bob', amount: 50.0 },
+            { userId: 'usr_charlie', amount: 50.0 }
+          ],
+          items: [
+            { id: 'it_1', description: 'Fresh produce & organic milk', amount: 90.0 },
+            { id: 'it_2', description: 'Gourmet cheese & crackers', amount: 60.0 }
+          ],
+          category: 'Food & Groceries',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'exp_electricity',
+          groupId: 'grp_apartment_3b',
+          description: 'AC Power & Electric Bill',
+          amount: 240.0,
+          currency: 'USD',
+          date: '2026-06-20',
+          paidBy: 'usr_bob',
+          splitMethod: 'exact',
+          splits: [
+            { userId: 'usr_alice', amount: 100.0 },
+            { userId: 'usr_bob', amount: 70.0 },
+            { userId: 'usr_charlie', amount: 70.0 }
+          ],
+          items: [
+            { id: 'it_e1', description: 'Standard utility usage charges', amount: 240.0 }
+          ],
+          category: 'Utilities & Bills',
+          createdAt: new Date().toISOString()
+        },
+        {
+          id: 'exp_cleaning',
+          groupId: 'grp_apartment_3b',
+          description: 'Flat Deep Cleaning Supplies',
+          amount: 90.0,
+          currency: 'USD',
+          date: '2026-06-25',
+          paidBy: 'usr_charlie',
+          splitMethod: 'shares',
+          splits: [
+            { userId: 'usr_alice', amount: 30.0, share: 1 },
+            { userId: 'usr_bob', amount: 30.0, share: 1 },
+            { userId: 'usr_charlie', amount: 30.0, share: 1 }
+          ],
+          items: [
+            { id: 'it_c1', description: 'Eco-friendly cleaning agents', amount: 50.0 },
+            { id: 'it_c2', description: 'Mop, broom & microfibre wipes', amount: 40.0 }
+          ],
+          category: 'Household',
+          createdAt: new Date().toISOString()
+        }
+      ];
+
+      for (const exp of sampleExpenses) {
+        await setDoc(doc(db, 'expenses', exp.id), exp);
+      }
+    }
+
+    // Seed master categories if empty
+    const categoriesSnap = await getDocs(collection(db, 'categories'));
+    if (categoriesSnap.empty) {
+      console.log('[Firestore] Categories collection is empty. Seeding starting categories...');
+      const defaultCategories = [
+        { id: 'cat_food', name: 'Food & Groceries', description: 'Groceries, dining out, and snacks' },
+        { id: 'cat_bills', name: 'Utilities & Bills', description: 'AC power, electricity, water, internet' },
+        { id: 'cat_rent', name: 'Rent & Lodging', description: 'Apartment rent and hotel bookings' },
+        { id: 'cat_house', name: 'Household', description: 'Cleaning supplies, furniture, and kitchen items' },
+        { id: 'cat_ent', name: 'Entertainment & Leisure', description: 'Movies, music, events, games' },
+        { id: 'cat_travel', name: 'Travel & Transport', description: 'Flights, trains, fuel, public transit' },
+        { id: 'cat_other', name: 'Other', description: 'Miscellaneous expenses' }
+      ];
+      for (const cat of defaultCategories) {
+        await setDoc(doc(db, 'categories', cat.id), cat);
+      }
+    }
+
+    // Seed exchange rates if empty
+    const ratesSnap = await getDocs(collection(db, 'exchangeRates'));
+    if (ratesSnap.empty) {
+      console.log('[Firestore] ExchangeRates collection is empty. Seeding starting rates...');
+      const defaultRates = [
+        { id: 'USD', code: 'USD', rate: 1.0 },
+        { id: 'EUR', code: 'EUR', rate: 0.91 },
+        { id: 'INR', code: 'INR', rate: 83.45 },
+        { id: 'GBP', code: 'GBP', rate: 0.78 },
+        { id: 'CAD', code: 'CAD', rate: 1.36 },
+        { id: 'AUD', code: 'AUD', rate: 1.49 },
+        { id: 'JPY', code: 'JPY', rate: 158.20 }
+      ];
+      for (const r of defaultRates) {
+        await setDoc(doc(db, 'exchangeRates', r.id), r);
+      }
+    }
+
+    console.log('[Firestore] Seeding verification completed successfully!');
   } catch (error) {
     console.error('[Firestore Error] Seeding failed:', error);
   }
@@ -217,7 +255,10 @@ export async function addMemberToGroup(groupId: string, userId: string, role: Us
     const group = targetGroup as Group;
     if (!group.members.includes(userId)) {
       const updatedMembers = [...group.members, userId];
-      const updatedRoles = { ...group.memberRoles, [userId]: role };
+      // Explicitly prevent assigning the 'admin' role to any member.
+      // This role is strictly reserved for the master administrator in the Admin Panel.
+      const safeRole = role === 'admin' ? 'member' : role;
+      const updatedRoles = { ...group.memberRoles, [userId]: safeRole };
       await updateDoc(groupRef, {
         members: updatedMembers,
         memberRoles: updatedRoles
@@ -445,5 +486,89 @@ export async function removeUserFromApp(userId: string): Promise<void> {
   // 4. Delete the user document from 'users' collection
   await deleteDoc(doc(db, 'users', userId));
 }
+
+// ---------------- MASTER DATA OPERATIONS ----------------
+
+export interface MasterCategory {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt?: string;
+}
+
+export interface MasterExchangeRate {
+  id: string; // currency code e.g. 'USD'
+  code: string;
+  rate: number;
+  updatedAt?: string;
+}
+
+export async function getMasterCategories(): Promise<MasterCategory[]> {
+  try {
+    const snap = await getDocs(collection(db, 'categories'));
+    const list: MasterCategory[] = [];
+    snap.forEach(d => {
+      list.push(d.data() as MasterCategory);
+    });
+    return list;
+  } catch (err) {
+    console.error('[Firestore] getMasterCategories error:', err);
+    return [];
+  }
+}
+
+export async function addMasterCategory(name: string, description: string = ''): Promise<MasterCategory> {
+  const id = `cat_${Math.random().toString(36).substr(2, 9)}`;
+  const cat: MasterCategory = {
+    id,
+    name: name.trim(),
+    description: description.trim(),
+    createdAt: new Date().toISOString()
+  };
+  await setDoc(doc(db, 'categories', id), cat);
+  return cat;
+}
+
+export async function updateMasterCategory(id: string, name: string, description: string = ''): Promise<void> {
+  await updateDoc(doc(db, 'categories', id), {
+    name: name.trim(),
+    description: description.trim()
+  });
+}
+
+export async function deleteMasterCategory(id: string): Promise<void> {
+  await deleteDoc(doc(db, 'categories', id));
+}
+
+export async function getMasterExchangeRates(): Promise<MasterExchangeRate[]> {
+  try {
+    const snap = await getDocs(collection(db, 'exchangeRates'));
+    const list: MasterExchangeRate[] = [];
+    snap.forEach(d => {
+      list.push(d.data() as MasterExchangeRate);
+    });
+    return list;
+  } catch (err) {
+    console.error('[Firestore] getMasterExchangeRates error:', err);
+    return [];
+  }
+}
+
+export async function updateMasterExchangeRate(code: string, rate: number): Promise<void> {
+  const upperCode = code.toUpperCase().trim();
+  const docRef = doc(db, 'exchangeRates', upperCode);
+  await setDoc(docRef, {
+    id: upperCode,
+    code: upperCode,
+    rate: Number(rate),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function deleteMasterExchangeRate(code: string): Promise<void> {
+  const upperCode = code.toUpperCase().trim();
+  await deleteDoc(doc(db, 'exchangeRates', upperCode));
+}
+
 
 

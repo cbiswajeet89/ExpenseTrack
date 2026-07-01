@@ -57,7 +57,7 @@ const simulatedInvites: Array<{
 }> = [];
 
 // Static currency exchange rates relative to USD (base: USD)
-const exchangeRates = {
+const exchangeRates: { [key: string]: number } = {
   USD: 1.0,
   EUR: 0.91,
   INR: 83.45,
@@ -98,10 +98,10 @@ const authenticateJWT = (req: AuthenticatedRequest, res: Response, next: NextFun
 
 // Middleware: Authorize Admin Actions
 const authorizeAdmin = (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
-  if (req.user && req.user.role === 'admin') {
+  if (req.user && req.user.email === 'admin@example.com' && req.user.role === 'admin') {
     next();
   } else {
-    res.status(403).json({ error: 'Forbidden: Administrative privilege required' });
+    res.status(403).json({ error: 'Forbidden: Master administrative privilege required' });
   }
 };
 
@@ -115,6 +115,42 @@ app.get('/api/rates', (req: Request, res: Response) => {
     rates: exchangeRates,
     updatedAt: new Date().toISOString()
   });
+});
+
+app.put('/api/rates/:code', authenticateJWT, authorizeAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const { code } = req.params;
+  const { rate } = req.body;
+  const upperCode = code.toUpperCase().trim();
+
+  if (!upperCode) {
+    res.status(400).json({ error: 'Currency code is required' });
+    return;
+  }
+  if (rate === undefined || isNaN(Number(rate)) || Number(rate) <= 0) {
+    res.status(400).json({ error: 'A positive numeric rate is required' });
+    return;
+  }
+
+  exchangeRates[upperCode] = Number(rate);
+  res.json({ success: true, message: `Currency ${upperCode} updated/added successfully.` });
+});
+
+app.delete('/api/rates/:code', authenticateJWT, authorizeAdmin, (req: AuthenticatedRequest, res: Response) => {
+  const { code } = req.params;
+  const upperCode = code.toUpperCase().trim();
+
+  if (upperCode === 'USD') {
+    res.status(400).json({ error: 'Cannot delete the base currency USD' });
+    return;
+  }
+
+  if (!(upperCode in exchangeRates)) {
+    res.status(404).json({ error: 'Currency code not found' });
+    return;
+  }
+
+  delete exchangeRates[upperCode];
+  res.json({ success: true, message: `Currency ${upperCode} deleted successfully.` });
 });
 
 // 2. Auth Endpoints
@@ -209,8 +245,8 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const inputHash = hashPassword(password);
 
     // Preseeded defaults check (fallback)
-    const isPreseededAdmin = formattedEmail === 'admin@example.com' || formattedEmail === 'cbiswajeet89@gmail.com' || formattedEmail === 'alice@example.com';
-    const isPreseededUser = isPreseededAdmin || formattedEmail === 'bob@example.com' || formattedEmail === 'charlie@example.com';
+    const isMasterAdmin = formattedEmail === 'admin@example.com';
+    const isPreseededUser = formattedEmail === 'admin@example.com' || formattedEmail === 'cbiswajeet89@gmail.com' || formattedEmail === 'alice@example.com' || formattedEmail === 'bob@example.com' || formattedEmail === 'charlie@example.com';
 
     if (!userDoc) {
       if (isPreseededUser && password === 'admin123') {
@@ -218,9 +254,9 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
                        formattedEmail === 'admin@example.com' ? 'usr_admin_default' :
                        formattedEmail === 'alice@example.com' ? 'usr_alice' :
                        formattedEmail === 'bob@example.com' ? 'usr_bob' : 'usr_charlie';
-        const role = isPreseededAdmin ? 'admin' : (formattedEmail === 'bob@example.com' ? 'manager' : 'member');
-        const name = formattedEmail === 'cbiswajeet89@gmail.com' ? 'Biswajeet Admin' :
-                     formattedEmail === 'admin@example.com' ? 'Default Admin' :
+        const role = isMasterAdmin ? 'admin' : (formattedEmail === 'bob@example.com' || formattedEmail === 'alice@example.com' || formattedEmail === 'cbiswajeet89@gmail.com' ? 'manager' : 'member');
+        const name = formattedEmail === 'cbiswajeet89@gmail.com' ? 'Biswajeet Manager' :
+                     formattedEmail === 'admin@example.com' ? 'Master Admin' :
                      formattedEmail === 'alice@example.com' ? 'Alice Smith' :
                      formattedEmail === 'bob@example.com' ? 'Bob Johnson' : 'Charlie Davis';
 
@@ -449,13 +485,14 @@ app.post('/api/invite/send', (req: Request, res: Response) => {
     return;
   }
 
+  const sanitizedRole = role === 'admin' ? 'member' : role;
   const token = `inv_${Math.random().toString(36).substr(2, 12)}_${Date.now()}`;
   const newInvite = {
     id: `id_${Math.random().toString(36).substr(2, 9)}`,
     groupId,
     groupName,
     email,
-    role,
+    role: sanitizedRole,
     token,
     status: 'pending' as const,
     createdAt: new Date().toISOString()
@@ -628,7 +665,8 @@ app.post('/api/invite/accept', async (req: Request, res: Response) => {
       const currentMembers = targetGroupDoc.members || [];
       if (!currentMembers.includes(userId)) {
         const updatedMembers = [...currentMembers, userId];
-        const updatedRoles = { ...(targetGroupDoc.memberRoles || {}), [userId]: invite.role };
+        const safeRole = invite.role === 'admin' ? 'member' : invite.role;
+        const updatedRoles = { ...(targetGroupDoc.memberRoles || {}), [userId]: safeRole };
         await updateDoc(targetGroupRef, {
           members: updatedMembers,
           memberRoles: updatedRoles
@@ -773,7 +811,7 @@ app.get('/api/admin/analytics', authenticateJWT, authorizeAdmin, async (req: Aut
 });
 
 // 8. Secured Master Admin Endpoint: Update User System Roles
-app.put('/api/admin/users/:id/role', authenticateJWT, authorizeAdmin, (req: AuthenticatedRequest, res: Response) => {
+app.put('/api/admin/users/:id/role', authenticateJWT, authorizeAdmin, async (req: AuthenticatedRequest, res: Response) => {
   const { id } = req.params;
   const { role } = req.body;
 
@@ -782,16 +820,112 @@ app.put('/api/admin/users/:id/role', authenticateJWT, authorizeAdmin, (req: Auth
     return;
   }
 
-  res.json({
-    success: true,
-    message: `User ${id} role successfully updated to ${role} via JWT-secured administrative terminal.`,
-    updatedUser: {
-      id,
-      role,
-      updatedBy: req.user?.email,
-      updatedAt: new Date().toISOString()
+  if (role === 'admin') {
+    res.status(400).json({ error: 'Failing Safety Constraint: No other user can be elevated to the master admin role.' });
+    return;
+  }
+
+  try {
+    const userRef = doc(db, 'users', id);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      res.status(404).json({ error: 'User not found in Firestore.' });
+      return;
     }
-  });
+    const userData = userSnap.data();
+    if (userData.email === 'admin@example.com') {
+      res.status(400).json({ error: 'Failing Safety Constraint: Cannot modify the role of the master admin.' });
+      return;
+    }
+
+    await updateDoc(userRef, { role });
+
+    res.json({
+      success: true,
+      message: `User ${id} role successfully updated to ${role} in Firestore via JWT-secured administrative terminal.`,
+      updatedUser: {
+        id,
+        role,
+        updatedBy: req.user?.email,
+        updatedAt: new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    console.error('[Admin Update Role Error]:', err);
+    res.status(500).json({ error: 'Failed to update user role in database.' });
+  }
+});
+
+// 8.2 Secured Master Admin Endpoint: Reset User Account (Password and/or Data)
+app.post('/api/admin/users/:id/reset', authenticateJWT, authorizeAdmin, async (req: AuthenticatedRequest, res: Response) => {
+  const { id } = req.params;
+  const { resetPassword, resetExpenses, manualPassword } = req.body;
+
+  try {
+    const userRef = doc(db, 'users', id);
+    const userSnap = await getDoc(userRef);
+    if (!userSnap.exists()) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+
+    const userData = userSnap.data();
+    if (userData.email === 'admin@example.com') {
+      res.status(400).json({ error: 'Cannot reset the master admin account.' });
+      return;
+    }
+
+    const updates: any = {};
+    let message = '';
+
+    if (resetPassword) {
+      // Reset password to manualPassword or default 'password'
+      const passToUse = (manualPassword && manualPassword.trim()) || 'password';
+      const defaultHash = hashPassword(passToUse);
+      updates.passwordHash = defaultHash;
+      message += `Password reset to "${passToUse}". `;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await updateDoc(userRef, updates);
+    }
+
+    if (resetExpenses) {
+      // Reset expenses: delete all expenses where this user is the payer or remove their splits
+      const expensesSnap = await getDocs(collection(db, 'expenses'));
+      let deletedCount = 0;
+      let updatedCount = 0;
+
+      for (const d of expensesSnap.docs) {
+        const exp = d.data();
+        if (exp.paidBy === id) {
+          await deleteDoc(d.ref);
+          deletedCount++;
+        } else if (exp.splits) {
+          const hasUserInSplit = exp.splits.some((s: any) => s.userId === id);
+          if (hasUserInSplit) {
+            const updatedSplits = exp.splits.filter((s: any) => s.userId !== id);
+            if (updatedSplits.length === 0) {
+              await deleteDoc(d.ref);
+              deletedCount++;
+            } else {
+              await updateDoc(d.ref, { splits: updatedSplits });
+              updatedCount++;
+            }
+          }
+        }
+      }
+      message += `Cleared/adjusted ${deletedCount} expenses paid by user and updated ${updatedCount} splits. `;
+    }
+
+    res.json({
+      success: true,
+      message: message.trim() || 'No reset actions performed.'
+    });
+  } catch (err: any) {
+    console.error('[Admin Reset User Error]:', err);
+    res.status(500).json({ error: 'Failed to reset user account' });
+  }
 });
 
 // 8.1 Secured Master Admin Endpoint: Delete User from Application

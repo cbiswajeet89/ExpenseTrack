@@ -42,6 +42,7 @@ interface GroupDetailProps {
   onUpdateGroup?: (groupId: string, name: string, description: string, currency: string) => Promise<void>;
   onDeleteGroup?: (groupId: string) => Promise<void>;
   onRemoveMember?: (groupId: string, userId: string) => Promise<void>;
+  categories?: string[];
 }
 
 export default function GroupDetail({ 
@@ -55,7 +56,8 @@ export default function GroupDetail({
   onUpdateExpense,
   onUpdateGroup,
   onDeleteGroup,
-  onRemoveMember
+  onRemoveMember,
+  categories: propCategories
 }: GroupDetailProps) {
   // Member records mapped
   const groupUsers = useMemo(() => {
@@ -275,7 +277,7 @@ export default function GroupDetail({
   const [reportLoading, setReportLoading] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState('2026-06');
 
-  const categories = [
+  const categories = propCategories && propCategories.length > 0 ? propCategories : [
     'Food & Groceries',
     'Utilities & Bills',
     'Rent & Lodging',
@@ -945,7 +947,7 @@ export default function GroupDetail({
                     </div>
 
                     {/* Remove Button for admins */}
-                    {isGroupAdmin && onRemoveMember && (
+                    {isGroupAdmin && onRemoveMember && (!isTargetAdmin || currentUserRole === 'admin') && (
                       <button
                         type="button"
                         disabled={isSelf && isTargetAdmin}
@@ -1055,7 +1057,6 @@ export default function GroupDetail({
               >
                 <option value="member">Group Member (Splitter)</option>
                 <option value="manager">Billing Manager (Add / Edit Auditor)</option>
-                <option value="admin">Group Administrator (Full Permissions)</option>
               </select>
             </div>
 
@@ -1170,6 +1171,7 @@ export default function GroupDetail({
           currency={group.currency}
           onClose={() => setEditingExpense(null)}
           onSave={onUpdateExpense!}
+          categories={categories}
         />
       )}
 

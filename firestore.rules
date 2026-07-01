@@ -45,6 +45,20 @@ service cloud.firestore {
         && data.createdAt is string;
     }
 
+    function isValidCategory(data) {
+      return data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 256
+        && data.get('description', '') is string && data.get('description', '').size() <= 2000
+        && data.get('createdAt', '') is string;
+    }
+
+    function isValidExchangeRate(data) {
+      return data.id is string && data.id.size() <= 10
+        && data.code is string && data.code.size() <= 10
+        && (data.rate is number || data.rate is int)
+        && data.get('updatedAt', '') is string;
+    }
+
     match /users/{userId} {
       allow read: if true;
       allow create, update: if isValidId(userId) && isValidUser(request.resource.data);
@@ -60,6 +74,18 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if true;
       allow create, update: if isValidId(expenseId) && isValidExpense(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /categories/{catId} {
+      allow read: if true;
+      allow create, update: if isValidId(catId) && isValidCategory(request.resource.data);
+      allow delete: if true;
+    }
+
+    match /exchangeRates/{rateId} {
+      allow read: if true;
+      allow create, update: if isValidId(rateId) && isValidExchangeRate(request.resource.data);
       allow delete: if true;
     }
   }

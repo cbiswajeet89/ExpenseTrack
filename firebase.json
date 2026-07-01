@@ -1,5 +1,6 @@
 {
   "firestore": {
+    "database": "ai-studio-expensetracker-25a0ccb2-1813-4b59-89a0-5fdc71f3eb70",
     "rules": "firestore.rules"
   }
 }

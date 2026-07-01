@@ -34,7 +34,10 @@ import {
   Filter, 
   Info,
   Calendar,
-  Search
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown
 } from 'lucide-react';
 import { getExpensesForGroup } from '../lib/dbHelper.js';
 import EditExpenseModal from './EditExpenseModal.js';
@@ -47,6 +50,7 @@ interface DashboardProps {
   currencyRates: { [key: string]: number };
   onUpdateExpense?: (expenseId: string, updatedExpense: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => Promise<void>;
   onDeleteExpense?: (expenseId: string, amount: number) => Promise<void>;
+  categories?: string[];
 }
 
 export default function Dashboard({ 
@@ -56,7 +60,8 @@ export default function Dashboard({
   currentUserId, 
   currencyRates,
   onUpdateExpense,
-  onDeleteExpense
+  onDeleteExpense,
+  categories: propCategories
 }: DashboardProps) {
   // Currency switcher state
   const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('selectedCurrency') || 'INR');
@@ -92,7 +97,7 @@ export default function Dashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
-  const categories = [
+  const categories = propCategories && propCategories.length > 0 ? propCategories : [
     'Food & Groceries',
     'Utilities & Bills',
     'Rent & Lodging',
@@ -174,6 +179,45 @@ export default function Dashboard({
       return matchesSearch && matchesCategory;
     });
   }, [displayedExpenses, searchQuery, selectedCategories, userMap]);
+
+  // Sorting configurations
+  const [sortField, setSortField] = useState<'date' | 'description' | 'category' | 'amount'>('date');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (field: 'date' | 'description' | 'category' | 'amount') => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('asc');
+    }
+  };
+
+  const sortedExpenses = useMemo(() => {
+    const list = [...filteredExpenses];
+    return list.sort((a, b) => {
+      let valA: any;
+      let valB: any;
+
+      if (sortField === 'date') {
+        valA = new Date(a.date).getTime();
+        valB = new Date(b.date).getTime();
+      } else if (sortField === 'description') {
+        valA = a.description.toLowerCase();
+        valB = b.description.toLowerCase();
+      } else if (sortField === 'category') {
+        valA = (a.category || '').toLowerCase();
+        valB = (b.category || '').toLowerCase();
+      } else if (sortField === 'amount') {
+        valA = Number(a.amount);
+        valB = Number(b.amount);
+      }
+
+      if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+      if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+      return 0;
+    });
+  }, [filteredExpenses, sortField, sortDirection]);
 
   // Currency Symbols configuration
   const currencySymbols: { [key: string]: string } = {
@@ -698,19 +742,35 @@ export default function Dashboard({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-150/80 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold uppercase tracking-wider text-[10px]">
-                  <th className="px-6 py-3">Date</th>
-                  <th className="px-6 py-3">Description</th>
-                  <th className="px-6 py-3">Category</th>
+                  <th onClick={() => handleSort('date')} className="px-6 py-3 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                    <span className="flex items-center gap-1">
+                      Date {sortField === 'date' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                    </span>
+                  </th>
+                  <th onClick={() => handleSort('description')} className="px-6 py-3 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                    <span className="flex items-center gap-1">
+                      Description {sortField === 'description' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                    </span>
+                  </th>
+                  <th onClick={() => handleSort('category')} className="px-6 py-3 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                    <span className="flex items-center gap-1">
+                      Category {sortField === 'category' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                    </span>
+                  </th>
                   <th className="px-6 py-3">Paid By</th>
                   <th className="px-6 py-3">Created By</th>
                   <th className="px-6 py-3 text-right">Original Cost</th>
-                  <th className="px-6 py-3 text-right">Total ({selectedCurrency})</th>
+                  <th onClick={() => handleSort('amount')} className="px-6 py-3 text-right cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                    <span className="flex items-center justify-end gap-1">
+                      Total ({selectedCurrency}) {sortField === 'amount' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
+                    </span>
+                  </th>
                   <th className="px-6 py-3 text-right">My Share ({selectedCurrency})</th>
                   <th className="px-6 py-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900">
-                {filteredExpenses.map((exp) => {
+                {sortedExpenses.map((exp) => {
                   const payer = userMap.get(exp.paidBy);
                   const creator = userMap.get(exp.createdBy || exp.paidBy);
                   const isDeleted = !!exp.isDeleted;
