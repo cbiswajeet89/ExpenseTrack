@@ -30,6 +30,7 @@ import AuthScreen from './components/AuthScreen.js';
 import Dashboard from './components/Dashboard.js';
 import GroupsList from './components/GroupsList.js';
 import GroupDetail from './components/GroupDetail.js';
+import SettlementMatrix from './components/SettlementMatrix.js';
 import AdminPanel from './components/AdminPanel.js';
 import ReferenceViewer from './components/ReferenceViewer.js';
 import ProfileSettings from './components/ProfileSettings.js';
@@ -48,7 +49,8 @@ import {
   ShieldAlert,
   UserCheck,
   Sun,
-  Moon
+  Moon,
+  Grid
 } from 'lucide-react';
 
 export default function App() {
@@ -77,7 +79,7 @@ export default function App() {
   });
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'groups' | 'admin' | 'reference' | 'profile'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'groups' | 'matrix' | 'admin' | 'reference' | 'profile'>('dashboard');
   
   // App initialization states
   const [loading, setLoading] = useState(true);
@@ -797,6 +799,19 @@ export default function App() {
                 </li>
                 <li>
                   <button
+                    onClick={() => setActiveTab('matrix')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
+                      activeTab === 'matrix'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                        : 'hover:bg-slate-800 hover:text-white text-slate-400'
+                    }`}
+                  >
+                    <Grid className="w-4 h-4" />
+                    <span>Settlement Matrix</span>
+                  </button>
+                </li>
+                <li>
+                  <button
                     onClick={() => setActiveTab('profile')}
                     className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
                       activeTab === 'profile'
@@ -888,6 +903,13 @@ export default function App() {
           <span className="text-[9px]">Groups</span>
         </button>
         <button
+          onClick={() => setActiveTab('matrix')}
+          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'matrix' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
+        >
+          <Grid className="w-4.5 h-4.5" />
+          <span className="text-[9px]">Matrix</span>
+        </button>
+        <button
           onClick={() => setActiveTab('profile')}
           className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'profile' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
         >
@@ -923,6 +945,7 @@ export default function App() {
             <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight uppercase">
               {activeTab === 'dashboard' && 'Dashboard Overview'}
               {activeTab === 'groups' && 'Shared Ledger Groups'}
+              {activeTab === 'matrix' && 'Settlement Matrix'}
               {activeTab === 'profile' && 'My Account Profile'}
               {activeTab === 'admin' && 'Master Administration'}
               {activeTab === 'reference' && 'Export Tech Stack'}
@@ -934,7 +957,7 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-4">
-            {activeTab === 'groups' && selectedGroup && (
+            {(activeTab === 'groups' || activeTab === 'matrix') && selectedGroup && (
               <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border border-indigo-100 dark:border-indigo-900/40">
                 Active Group: {selectedGroup.name}
               </span>
@@ -1004,6 +1027,15 @@ export default function App() {
                 )}
               </div>
             </div>
+          )}
+
+          {activeTab === 'matrix' && (
+            <SettlementMatrix
+              groups={groups}
+              expenses={expenses}
+              users={users}
+              currentUserId={currentUser.id}
+            />
           )}
 
           {activeTab === 'admin' && currentUser?.role === 'admin' && (

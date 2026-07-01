@@ -22,7 +22,11 @@ import {
   AlertTriangle,
   Pencil,
   UserMinus,
-  Users
+  Users,
+  Search,
+  Filter,
+  ArrowRight,
+  Info
 } from 'lucide-react';
 import EditExpenseModal from './EditExpenseModal.js';
 
@@ -59,6 +63,9 @@ export default function GroupDetail({
   }, [users, group.members]);
 
   const [showDeleted, setShowDeleted] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [ledgerView, setLedgerView] = useState<'balances' | 'simplified'>('balances');
 
   const activeExpenses = useMemo(() => {
     return expenses.filter(e => !e.isDeleted);
@@ -72,6 +79,28 @@ export default function GroupDetail({
     if (showDeleted) return expenses;
     return activeExpenses;
   }, [activeExpenses, expenses, showDeleted]);
+
+  // Filtered expenses for search & category filters
+  const filteredExpenses = useMemo(() => {
+    return displayedExpenses.filter(exp => {
+      if (exp.groupId !== group.id) return false;
+
+      // Search match
+      const queryText = searchQuery.toLowerCase().trim();
+      const payerName = users.find(u => u.id === exp.paidBy)?.name || '';
+      
+      const matchesSearch = !queryText || 
+        exp.description.toLowerCase().includes(queryText) ||
+        (exp.category && exp.category.toLowerCase().includes(queryText)) ||
+        payerName.toLowerCase().includes(queryText) ||
+        (exp.items && exp.items.some(it => it.description.toLowerCase().includes(queryText)));
+
+      // Category match
+      const matchesCategory = selectedCategories.length === 0 || selectedCategories.includes(exp.category);
+
+      return matchesSearch && matchesCategory;
+    });
+  }, [displayedExpenses, searchQuery, selectedCategories, group.id, users]);
 
   // Calculate member balances for this group
   const memberBalances = useMemo(() => {
@@ -103,6 +132,65 @@ export default function GroupDetail({
 
     return balances;
   }, [activeExpenses, group.members, group.id]);
+
+  // Optimize settlement routes for simplified repayments (normalize)
+  const simplifiedDebts = useMemo(() => {
+    const debtors: Array<{ id: string; name: string; amount: number }> = [];
+    const creditors: Array<{ id: string; name: string; amount: number }> = [];
+
+    Object.entries(memberBalances).forEach(([userId, balVal]) => {
+      const bal = balVal as number;
+      const u = users.find(user => user.id === userId);
+      if (!u) return;
+
+      if (Math.abs(bal) < 0.01) return;
+
+      if (bal < 0) {
+        debtors.push({ id: userId, name: u.name, amount: Math.abs(bal) });
+      } else if (bal > 0) {
+        creditors.push({ id: userId, name: u.name, amount: bal });
+      }
+    });
+
+    const settlements: Array<{
+      fromId: string;
+      fromName: string;
+      toId: string;
+      toName: string;
+      amount: number;
+    }> = [];
+
+    const dList = debtors.map(d => ({ ...d }));
+    const cList = creditors.map(c => ({ ...c }));
+
+    let safetyVal = 0;
+    while (dList.length > 0 && cList.length > 0 && safetyVal < 500) {
+      safetyVal++;
+      dList.sort((a, b) => b.amount - a.amount);
+      cList.sort((a, b) => b.amount - a.amount);
+
+      const debtor = dList[0];
+      const creditor = cList[0];
+
+      const settleAmount = Math.min(debtor.amount, creditor.amount);
+
+      settlements.push({
+        fromId: debtor.id,
+        fromName: debtor.name,
+        toId: creditor.id,
+        toName: creditor.name,
+        amount: settleAmount
+      });
+
+      debtor.amount -= settleAmount;
+      creditor.amount -= settleAmount;
+
+      if (debtor.amount < 0.01) dList.shift();
+      if (creditor.amount < 0.01) cList.shift();
+    }
+
+    return settlements;
+  }, [memberBalances, users]);
 
   // Check if current user is admin of the group or global admin
   const isGroupAdmin = useMemo(() => {
@@ -605,13 +693,76 @@ export default function GroupDetail({
             )}
           </div>
           
+          {/* SEARCH & CATEGORY FILTERS */}
+          <div className="space-y-3.5 mb-6 bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-2xl border border-slate-100/80 dark:border-slate-800/40">
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-gray-400 dark:text-slate-500" />
+              </span>
+              <input
+                type="text"
+                placeholder="Search description, items, or payers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="block w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 text-xs placeholder-gray-400 dark:placeholder-slate-500 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                <Filter className="w-3 h-3 text-indigo-500" /> Categories Filter (Multiselect)
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategories([])}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer select-none border ${
+                    selectedCategories.length === 0
+                      ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/50 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  All
+                </button>
+                {categories.map(cat => {
+                  const isSelected = selectedCategories.includes(cat);
+                  return (
+                    <button
+                      type="button"
+                      key={cat}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedCategories(selectedCategories.filter(c => c !== cat));
+                        } else {
+                          setSelectedCategories([...selectedCategories, cat]);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer select-none border ${
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/50 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          
           {displayedExpenses.length === 0 ? (
             <p className="text-xs text-gray-400 py-6 text-center">
               {showDeleted ? "No transactions logged in this group yet." : "No active transactions logged. Check \"Include Deleted\" for audit logs if any exist."}
             </p>
+          ) : filteredExpenses.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-400 font-medium bg-slate-50 rounded-2xl flex flex-col items-center justify-center gap-1.5 border border-dashed border-slate-150">
+              <Info className="w-5 h-5 text-slate-300" />
+              No transactions match your search query or category filter.
+            </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {displayedExpenses.map((exp) => {
+              {filteredExpenses.map((exp) => {
                 const payingUser = users.find(u => u.id === exp.paidBy);
                 const creatorUser = users.find(u => u.id === (exp.createdBy || exp.paidBy));
                 const isDeleted = !!exp.isDeleted;
@@ -625,7 +776,7 @@ export default function GroupDetail({
                     }`}
                   >
                     <div className="space-y-1">
-                      <h4 className={`font-semibold ${isDeleted ? 'text-rose-800 line-through' : 'text-gray-800'}`}>
+                      <h4 className={`font-semibold ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-800 dark:text-slate-200'}`}>
                         {exp.description}
                       </h4>
                       <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
@@ -728,87 +879,149 @@ export default function GroupDetail({
             </span>
           </div>
 
-          <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto pr-1">
-            {groupUsers.map(gu => {
-              const bal = memberBalances[gu.id] || 0;
-              const hasDues = Math.abs(bal) >= 0.01;
-              const isSelf = gu.id === currentUserId;
-              const isTargetAdmin = group.memberRoles[gu.id] === 'admin';
-              
-              // Determine balance color & sign
-              let balText = 'Settled';
-              let balColor = 'text-gray-400 bg-gray-50';
-              if (bal > 0.01) {
-                balText = `Owed: +${group.currency} ${bal.toFixed(2)}`;
-                balColor = 'text-emerald-750 bg-emerald-50';
-              } else if (bal < -0.01) {
-                balText = `Owes: -${group.currency} ${Math.abs(bal).toFixed(2)}`;
-                balColor = 'text-rose-700 bg-rose-50';
-              }
+          {/* TABS SELECTOR FOR BALANCES VS SIMPLIFIED */}
+          <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold select-none border border-slate-200/40">
+            <button
+              type="button"
+              onClick={() => setLedgerView('balances')}
+              className={`flex-1 py-1.5 rounded-lg text-center transition cursor-pointer ${
+                ledgerView === 'balances' 
+                  ? 'bg-white text-indigo-600 shadow-xs' 
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Balances
+            </button>
+            <button
+              type="button"
+              onClick={() => setLedgerView('simplified')}
+              className={`flex-1 py-1.5 rounded-lg text-center transition cursor-pointer ${
+                ledgerView === 'simplified' 
+                  ? 'bg-white text-indigo-600 shadow-xs' 
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              Simplified (Normalize)
+            </button>
+          </div>
 
-              return (
-                <div key={gu.id} className="py-2.5 flex items-center justify-between text-xs group/member">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-semibold text-gray-800">{gu.name}</span>
-                      {isSelf && (
-                        <span className="text-[8px] bg-indigo-50 text-indigo-600 px-1 rounded uppercase font-bold font-mono">
-                          You
+          {ledgerView === 'balances' ? (
+            <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto pr-1">
+              {groupUsers.map(gu => {
+                const bal = memberBalances[gu.id] || 0;
+                const hasDues = Math.abs(bal) >= 0.01;
+                const isSelf = gu.id === currentUserId;
+                const isTargetAdmin = group.memberRoles[gu.id] === 'admin';
+                
+                // Determine balance color & sign
+                let balText = 'Settled';
+                let balColor = 'text-gray-400 bg-gray-50';
+                if (bal > 0.01) {
+                  balText = `Owed: +${group.currency} ${bal.toFixed(2)}`;
+                  balColor = 'text-emerald-750 bg-emerald-50';
+                } else if (bal < -0.01) {
+                  balText = `Owes: -${group.currency} ${Math.abs(bal).toFixed(2)}`;
+                  balColor = 'text-rose-700 bg-rose-50';
+                }
+
+                return (
+                  <div key={gu.id} className="py-2.5 flex items-center justify-between text-xs group/member">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-semibold text-gray-800">{gu.name}</span>
+                        {isSelf && (
+                          <span className="text-[8px] bg-indigo-50 text-indigo-600 px-1 rounded uppercase font-bold font-mono">
+                            You
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                        <span className="capitalize font-medium">{group.memberRoles[gu.id]}</span>
+                        <span>•</span>
+                        <span className={`px-1.5 py-0.5 rounded font-mono font-bold ${balColor}`}>
+                          {balText}
                         </span>
-                      )}
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
-                      <span className="capitalize font-medium">{group.memberRoles[gu.id]}</span>
-                      <span>•</span>
-                      <span className={`px-1.5 py-0.5 rounded font-mono font-bold ${balColor}`}>
-                        {balText}
+
+                    {/* Remove Button for admins */}
+                    {isGroupAdmin && onRemoveMember && (
+                      <button
+                        type="button"
+                        disabled={isSelf && isTargetAdmin}
+                        onClick={() => {
+                          if (hasDues) {
+                            setConfirmDialog({
+                              isOpen: true,
+                              title: '❌ Cannot Remove Roommate',
+                              message: `You cannot remove ${gu.name} because they have outstanding dues of ${group.currency} ${Math.abs(bal).toFixed(2)}. All balances must be settled (balance = 0) before a member can be removed from this room ledger.`,
+                              type: 'danger',
+                              onConfirm: () => setConfirmDialog(null)
+                            });
+                          } else {
+                            setConfirmDialog({
+                              isOpen: true,
+                              title: '👤 Remove Roommate',
+                              message: `Are you sure you want to remove ${gu.name} from "${group.name}"? They will no longer be part of this expense sharing room.`,
+                              type: 'warning',
+                              onConfirm: async () => {
+                                setConfirmDialog(null);
+                                try {
+                                  await onRemoveMember(group.id, gu.id);
+                                } catch (err: any) {
+                                  alert(err.message || 'Failed to remove member');
+                                }
+                              }
+                            });
+                          }
+                        }}
+                        title={isSelf && isTargetAdmin ? "You cannot remove yourself" : `Remove ${gu.name} from group`}
+                        className={`p-1.5 rounded-lg transition-all duration-200 border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-500 dark:text-rose-400 hover:text-rose-600 cursor-pointer opacity-0 group-hover/member:opacity-100 ${
+                          isSelf && isTargetAdmin ? 'hidden' : ''
+                        }`}
+                      >
+                        <UserMinus className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto pr-1 space-y-2.5">
+              {simplifiedDebts.length === 0 ? (
+                <div className="py-8 text-center text-xs text-emerald-600 font-semibold bg-emerald-50/15 border border-emerald-100/30 rounded-xl flex flex-col items-center justify-center gap-1">
+                  <Check className="w-5 h-5 text-emerald-500 shrink-0" />
+                  All balances are settled!
+                </div>
+              ) : (
+                simplifiedDebts.map((debt, idx) => (
+                  <div key={idx} className="p-3 border border-slate-100 bg-slate-50/30 rounded-xl space-y-2 flex flex-col">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-400 font-medium">Repayment #{idx + 1}</span>
+                      <span className="font-mono font-bold text-slate-800 bg-white border border-slate-100 px-2 py-0.5 rounded-lg shadow-2xs">
+                        {group.currency} {debt.amount.toFixed(2)}
                       </span>
                     </div>
+                    
+                    <div className="flex items-center justify-between gap-1 text-xs">
+                      <div className="flex flex-col">
+                        <span className="text-[9px] uppercase font-bold tracking-wider text-rose-500">Pays</span>
+                        <span className="font-bold text-gray-850 truncate max-w-[100px]">{debt.fromName}</span>
+                      </div>
+                      
+                      <ArrowRight className="w-4 h-4 text-indigo-500 shrink-0" />
+                      
+                      <div className="flex flex-col text-right">
+                        <span className="text-[9px] uppercase font-bold tracking-wider text-emerald-500">Receives</span>
+                        <span className="font-bold text-gray-850 truncate max-w-[100px]">{debt.toName}</span>
+                      </div>
+                    </div>
                   </div>
-
-                  {/* Remove Button for admins */}
-                  {isGroupAdmin && onRemoveMember && (
-                    <button
-                      type="button"
-                      disabled={isSelf && isTargetAdmin}
-                      onClick={() => {
-                        if (hasDues) {
-                          setConfirmDialog({
-                            isOpen: true,
-                            title: '❌ Cannot Remove Roommate',
-                            message: `You cannot remove ${gu.name} because they have outstanding dues of ${group.currency} ${Math.abs(bal).toFixed(2)}. All balances must be settled (balance = 0) before a member can be removed from this room ledger.`,
-                            type: 'danger',
-                            onConfirm: () => setConfirmDialog(null)
-                          });
-                        } else {
-                          setConfirmDialog({
-                            isOpen: true,
-                            title: '👤 Remove Roommate',
-                            message: `Are you sure you want to remove ${gu.name} from "${group.name}"? They will no longer be part of this expense sharing room.`,
-                            type: 'warning',
-                            onConfirm: async () => {
-                              setConfirmDialog(null);
-                              try {
-                                await onRemoveMember(group.id, gu.id);
-                              } catch (err: any) {
-                                alert(err.message || 'Failed to remove member');
-                              }
-                            }
-                          });
-                        }
-                      }}
-                      title={isSelf && isTargetAdmin ? "You cannot remove yourself" : `Remove ${gu.name} from group`}
-                      className={`p-1.5 rounded-lg transition-all duration-200 border border-gray-100 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-500 dark:text-rose-400 hover:text-rose-600 cursor-pointer opacity-0 group-hover/member:opacity-100 ${
-                        isSelf && isTargetAdmin ? 'hidden' : ''
-                      }`}
-                    >
-                      <UserMinus className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
         {/* INVITE NEW MEMBERS VIA SECURE EMAIL LINK */}
