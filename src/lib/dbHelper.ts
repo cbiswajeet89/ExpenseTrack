@@ -350,3 +350,42 @@ export async function updateGroupInDb(
   await updateDoc(groupRef, { name, description, currency });
 }
 
+export async function deleteGroupFromDb(groupId: string): Promise<void> {
+  // 1. Delete all expenses associated with this group
+  const expensesSnap = await getDocs(collection(db, 'expenses'));
+  for (const docRef of expensesSnap.docs) {
+    const exp = docRef.data() as Expense;
+    if (exp.groupId === groupId) {
+      await deleteDoc(doc(db, 'expenses', docRef.id));
+    }
+  }
+
+  // 2. Delete the group document itself
+  await deleteDoc(doc(db, 'groups', groupId));
+}
+
+export async function removeMemberFromGroup(groupId: string, userId: string): Promise<void> {
+  const groupRef = doc(db, 'groups', groupId);
+  // Fetch group first
+  const snap = await getDocs(query(collection(db, 'groups')));
+  let targetGroup: Group | null = null;
+  snap.forEach(d => {
+    if (d.id === groupId) {
+      targetGroup = d.data() as Group;
+    }
+  });
+
+  if (targetGroup) {
+    const group = targetGroup as Group;
+    if (group.members.includes(userId)) {
+      const updatedMembers = group.members.filter(m => m !== userId);
+      const updatedRoles = { ...group.memberRoles };
+      delete updatedRoles[userId];
+      await updateDoc(groupRef, {
+        members: updatedMembers,
+        memberRoles: updatedRoles
+      });
+    }
+  }
+}
+

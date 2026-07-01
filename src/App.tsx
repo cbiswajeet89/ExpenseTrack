@@ -17,7 +17,9 @@ import {
   addMemberToGroup,
   getAllGroups,
   updateExpenseInDb,
-  updateGroupInDb
+  updateGroupInDb,
+  deleteGroupFromDb,
+  removeMemberFromGroup
 } from './lib/dbHelper.js';
 
 // Sub-components
@@ -293,6 +295,42 @@ export default function App() {
       setGroups(prev => prev.map(g => g.id === groupId ? { ...g, name, description, currency } : g));
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  // Delete group (cascade deletes all expenses)
+  const handleDeleteGroup = async (groupId: string) => {
+    try {
+      await deleteGroupFromDb(groupId);
+      setGroups(prev => prev.filter(g => g.id !== groupId));
+      if (selectedGroupId === groupId) {
+        setSelectedGroupId(null);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Remove member from group
+  const handleRemoveMember = async (groupId: string, userId: string) => {
+    try {
+      await removeMemberFromGroup(groupId, userId);
+      setGroups(prev => prev.map(g => {
+        if (g.id === groupId) {
+          const updatedMembers = g.members.filter(m => m !== userId);
+          const updatedRoles = { ...g.memberRoles };
+          delete updatedRoles[userId];
+          return {
+            ...g,
+            members: updatedMembers,
+            memberRoles: updatedRoles
+          };
+        }
+        return g;
+      }));
+    } catch (err) {
+      console.error(err);
+      throw err;
     }
   };
 
@@ -866,6 +904,8 @@ export default function App() {
                     onDeleteExpense={handleDeleteExpense}
                     onUpdateExpense={handleUpdateExpense}
                     onUpdateGroup={handleUpdateGroup}
+                    onDeleteGroup={handleDeleteGroup}
+                    onRemoveMember={handleRemoveMember}
                   />
                 ) : (
                   <div className="h-96 border border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center p-6 text-center bg-white shadow-sm">

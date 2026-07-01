@@ -20,7 +20,9 @@ import {
   FileSpreadsheet, 
   RefreshCw,
   AlertTriangle,
-  Pencil
+  Pencil,
+  UserMinus,
+  Users
 } from 'lucide-react';
 import EditExpenseModal from './EditExpenseModal.js';
 
@@ -34,6 +36,8 @@ interface GroupDetailProps {
   onDeleteExpense: (expenseId: string, amount: number) => Promise<void>;
   onUpdateExpense?: (expenseId: string, updatedExpense: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => Promise<void>;
   onUpdateGroup?: (groupId: string, name: string, description: string, currency: string) => Promise<void>;
+  onDeleteGroup?: (groupId: string) => Promise<void>;
+  onRemoveMember?: (groupId: string, userId: string) => Promise<void>;
 }
 
 export default function GroupDetail({ 
@@ -45,12 +49,45 @@ export default function GroupDetail({
   onAddExpense, 
   onDeleteExpense,
   onUpdateExpense,
-  onUpdateGroup
+  onUpdateGroup,
+  onDeleteGroup,
+  onRemoveMember
 }: GroupDetailProps) {
   // Member records mapped
   const groupUsers = useMemo(() => {
     return users.filter(u => group.members.includes(u.id));
   }, [users, group.members]);
+
+  // Calculate member balances for this group
+  const memberBalances = useMemo(() => {
+    const balances: { [userId: string]: number } = {};
+    
+    // Initialize members with 0
+    group.members.forEach(mId => {
+      balances[mId] = 0;
+    });
+
+    // Sum all expenses and subtract splits
+    expenses.forEach(exp => {
+      if (exp.groupId !== group.id) return;
+
+      // PaidBy gets the credit
+      if (balances[exp.paidBy] !== undefined) {
+        balances[exp.paidBy] += Number(exp.amount);
+      }
+
+      // Splits get the debit
+      if (exp.splits) {
+        exp.splits.forEach(split => {
+          if (balances[split.userId] !== undefined) {
+            balances[split.userId] -= Number(split.amount);
+          }
+        });
+      }
+    });
+
+    return balances;
+  }, [expenses, group.members, group.id]);
 
   // Check if current user is admin of the group or global admin
   const isGroupAdmin = useMemo(() => {
@@ -629,6 +666,100 @@ export default function GroupDetail({
       {/* RIGHT COLUMN: Invitations & Automated Monthly Reports */}
       <div className="space-y-8">
         
+        {/* ROOMMATES & BALANCES LIST */}
+        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-gray-900 tracking-tight flex items-center gap-2">
+              <Users className="w-4.5 h-4.5 text-gray-500" /> Roommates Ledger
+            </h3>
+            <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono font-bold">
+              {groupUsers.length} members
+            </span>
+          </div>
+
+          <div className="divide-y divide-gray-50 max-h-80 overflow-y-auto pr-1">
+            {groupUsers.map(gu => {
+              const bal = memberBalances[gu.id] || 0;
+              const hasDues = Math.abs(bal) >= 0.01;
+              const isSelf = gu.id === currentUserId;
+              const isTargetAdmin = group.memberRoles[gu.id] === 'admin';
+              
+              // Determine balance color & sign
+              let balText = 'Settled';
+              let balColor = 'text-gray-400 bg-gray-50';
+              if (bal > 0.01) {
+                balText = `Owed: +${group.currency} ${bal.toFixed(2)}`;
+                balColor = 'text-emerald-750 bg-emerald-50';
+              } else if (bal < -0.01) {
+                balText = `Owes: -${group.currency} ${Math.abs(bal).toFixed(2)}`;
+                balColor = 'text-rose-700 bg-rose-50';
+              }
+
+              return (
+                <div key={gu.id} className="py-2.5 flex items-center justify-between text-xs group/member">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold text-gray-800">{gu.name}</span>
+                      {isSelf && (
+                        <span className="text-[8px] bg-indigo-50 text-indigo-600 px-1 rounded uppercase font-bold font-mono">
+                          You
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-gray-400">
+                      <span className="capitalize font-medium">{group.memberRoles[gu.id]}</span>
+                      <span>•</span>
+                      <span className={`px-1.5 py-0.5 rounded font-mono font-bold ${balColor}`}>
+                        {balText}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Remove Button for admins */}
+                  {isGroupAdmin && onRemoveMember && (
+                    <button
+                      type="button"
+                      disabled={isSelf && isTargetAdmin}
+                      onClick={() => {
+                        if (hasDues) {
+                          setConfirmDialog({
+                            isOpen: true,
+                            title: '❌ Cannot Remove Roommate',
+                            message: `You cannot remove ${gu.name} because they have outstanding dues of ${group.currency} ${Math.abs(bal).toFixed(2)}. All balances must be settled (balance = 0) before a member can be removed from this room ledger.`,
+                            type: 'danger',
+                            onConfirm: () => setConfirmDialog(null)
+                          });
+                        } else {
+                          setConfirmDialog({
+                            isOpen: true,
+                            title: '👤 Remove Roommate',
+                            message: `Are you sure you want to remove ${gu.name} from "${group.name}"? They will no longer be part of this expense sharing room.`,
+                            type: 'warning',
+                            onConfirm: async () => {
+                              setConfirmDialog(null);
+                              try {
+                                await onRemoveMember(group.id, gu.id);
+                              } catch (err: any) {
+                                alert(err.message || 'Failed to remove member');
+                              }
+                            }
+                          });
+                        }
+                      }}
+                      title={isSelf && isTargetAdmin ? "You cannot remove yourself" : `Remove ${gu.name} from group`}
+                      className={`p-1.5 rounded-lg transition border border-gray-100 bg-white shadow-xs opacity-0 group-hover/member:opacity-100 hover:bg-rose-50 hover:text-rose-600 cursor-pointer ${
+                        isSelf && isTargetAdmin ? 'hidden' : 'text-gray-450'
+                      }`}
+                    >
+                      <UserMinus className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
         {/* INVITE NEW MEMBERS VIA SECURE EMAIL LINK */}
         <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
           <h3 className="text-sm font-semibold text-gray-900 tracking-tight flex items-center gap-2 mb-1.5">
@@ -780,18 +911,18 @@ export default function GroupDetail({
 
       {isEditingGroup && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white border border-slate-100 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col my-8">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+          <div className="bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col my-8">
+            <div className="px-6 py-4 border-b border-slate-100 dark:border-slate-850 flex items-center justify-between bg-slate-50 dark:bg-slate-850/50">
               <div className="flex items-center gap-2">
-                <Pencil className="w-5 h-5 text-indigo-600" />
+                <Pencil className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                 <div>
-                  <h3 className="text-sm font-bold text-slate-800">Edit Group Details</h3>
-                  <p className="text-[10px] text-slate-400 mt-0.5">Modify workspace room details</p>
+                  <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">Edit Group Details</h3>
+                  <p className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">Modify workspace room details</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsEditingGroup(false)}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1"
+                className="text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300 text-sm font-bold p-1 cursor-pointer"
               >
                 ✕
               </button>
@@ -799,37 +930,37 @@ export default function GroupDetail({
 
             <form onSubmit={handleGroupUpdateSubmit} className="p-6 space-y-4">
               {groupError && (
-                <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2.5 rounded-xl font-semibold mb-2 text-xs">
+                <div className="bg-rose-50 border border-rose-200 text-rose-700 dark:bg-rose-950/20 dark:border-rose-900/40 dark:text-rose-400 p-2.5 rounded-xl font-semibold mb-2 text-xs">
                   ⚠️ {groupError}
                 </div>
               )}
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Group Name</label>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Group Name</label>
                 <input
                   type="text"
                   required
                   value={editGroupName}
                   onChange={(e) => setEditGroupName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Description</label>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Description</label>
                 <textarea
                   value={editGroupDesc}
                   onChange={(e) => setEditGroupDesc(e.target.value)}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Base Currency</label>
+                <label className="block text-xs font-semibold text-gray-600 dark:text-slate-400 mb-1">Base Currency</label>
                 <select
                   value={editGroupCurrency}
                   onChange={(e) => setEditGroupCurrency(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-semibold"
+                  className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-semibold"
                 >
                   <option value="USD">USD ($)</option>
                   <option value="EUR">EUR (€)</option>
@@ -841,20 +972,47 @@ export default function GroupDetail({
                 </select>
               </div>
 
-              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setIsEditingGroup(false)}
-                  className="px-4 py-2 border border-gray-200 text-gray-500 hover:text-gray-700 rounded-xl text-xs font-semibold transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition"
-                >
-                  Save Changes
-                </button>
+              <div className="flex items-center justify-between pt-4 border-t border-slate-100 dark:border-slate-800">
+                {isGroupAdmin && onDeleteGroup && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmDialog({
+                        isOpen: true,
+                        title: '⚠️ Permanent Group Deletion',
+                        message: `Are you sure you want to permanently delete "${group.name}"? This action CANNOT be undone and will cascade delete all ${expenses.filter(e => e.groupId === group.id).length} transactions in this group ledger.`,
+                        type: 'danger',
+                        onConfirm: async () => {
+                          setConfirmDialog(null);
+                          try {
+                            await onDeleteGroup(group.id);
+                            setIsEditingGroup(false);
+                          } catch (err: any) {
+                            setGroupError(err.message || 'Failed to delete group');
+                          }
+                        }
+                      });
+                    }}
+                    className="inline-flex items-center gap-1 px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 dark:text-rose-500 dark:bg-rose-950/20 dark:hover:bg-rose-950/40 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" /> Delete Group
+                  </button>
+                )}
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingGroup(false)}
+                    className="px-4 py-2 border border-gray-200 dark:border-slate-700 text-gray-500 hover:text-gray-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition cursor-pointer"
+                  >
+                    Save Changes
+                  </button>
+                </div>
               </div>
             </form>
           </div>
