@@ -5,7 +5,7 @@
 
 import React, { useState } from 'react';
 import { User, UserRole } from '../types.js';
-import { Shield, Key, Sparkles, UserCheck } from 'lucide-react';
+import { Shield, Key, Sparkles, UserCheck, Lock } from 'lucide-react';
 
 interface AuthScreenProps {
   onAuthSuccess: (user: User, token: string) => void;
@@ -14,16 +14,17 @@ interface AuthScreenProps {
 export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<UserRole>('member');
+  const [password, setPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const preseededUsers = [
+    { email: 'admin@example.com', name: 'Default Admin', role: 'admin' as const },
+    { email: 'cbiswajeet89@gmail.com', name: 'Biswajeet Admin', role: 'admin' as const },
     { email: 'alice@example.com', name: 'Alice Smith', role: 'admin' as const },
     { email: 'bob@example.com', name: 'Bob Johnson', role: 'manager' as const },
-    { email: 'charlie@example.com', name: 'Charlie Davis', role: 'member' as const },
-    { email: 'cbiswajeet89@gmail.com', name: 'Biswajeet Admin', role: 'admin' as const }
+    { email: 'charlie@example.com', name: 'Charlie Davis', role: 'member' as const }
   ];
 
   const handleAuth = async (e?: React.FormEvent, selectedUser?: typeof preseededUsers[0]) => {
@@ -32,24 +33,24 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
     setLoading(true);
 
     const targetEmail = selectedUser ? selectedUser.email : email;
-    const targetName = selectedUser ? selectedUser.name : name;
-    const targetRole = selectedUser ? selectedUser.role : role;
+    const targetPassword = selectedUser ? 'admin123' : password;
 
-    if (!targetEmail || (!isRegistering && !selectedUser && !targetName)) {
-      setError('Please provide both name and email.');
+    if (!targetEmail || !targetPassword || (isRegistering && !name)) {
+      setError(isRegistering ? 'Please provide email, name, and password.' : 'Please provide both email and password.');
       setLoading(false);
       return;
     }
 
     try {
-      const response = await fetch('/api/auth/login', {
+      const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
+      const bodyPayload = isRegistering 
+        ? { email: targetEmail, name, password: targetPassword } 
+        : { email: targetEmail, password: targetPassword };
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: targetEmail,
-          name: targetName || targetEmail.split('@')[0],
-          role: targetRole
-        })
+        body: JSON.stringify(bodyPayload)
       });
 
       const data = await response.json();
@@ -57,14 +58,9 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
         throw new Error(data.error || 'Authentication failed');
       }
 
-      // Save user & token to state
       onAuthSuccess(
         {
-          id: data.user.email === 'alice@example.com' ? 'usr_alice' : 
-              data.user.email === 'bob@example.com' ? 'usr_bob' : 
-              data.user.email === 'charlie@example.com' ? 'usr_charlie' : 
-              data.user.email === 'cbiswajeet89@gmail.com' ? 'usr_admin' : 
-              `usr_${Math.random().toString(36).substr(2, 9)}`,
+          id: data.user.id,
           email: data.user.email,
           name: data.user.name,
           role: data.user.role,
@@ -73,7 +69,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
         data.token
       );
     } catch (err: any) {
-      setError(err.message || 'Something went wrong during login.');
+      setError(err.message || 'Something went wrong during authentication.');
     } finally {
       setLoading(false);
     }
@@ -105,14 +101,14 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           <button
             type="button"
             className={`flex-1 pb-3 transition-colors ${!isRegistering ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-            onClick={() => { setIsRegistering(false); setError(''); }}
+            onClick={() => { setIsRegistering(false); setError(''); setPassword(''); }}
           >
             Sign In / Quick Sandbox
           </button>
           <button
             type="button"
             className={`flex-1 pb-3 transition-colors ${isRegistering ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-            onClick={() => { setIsRegistering(true); setError(''); }}
+            onClick={() => { setIsRegistering(true); setError(''); setPassword(''); }}
           >
             Create New Account
           </button>
@@ -123,7 +119,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
             {/* Quick Sandbox Profiles */}
             <div className="mb-6">
               <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-3">
-                ⚡ Quick Sign-In (Pre-seeded Roles)
+                ⚡ Quick Sign-In (Default Password: <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px] font-mono text-slate-600 select-all">admin123</code>)
               </label>
               <div className="grid grid-cols-2 gap-2">
                 {preseededUsers.map((user) => (
@@ -158,18 +154,18 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@example.com"
+                  placeholder="admin@example.com"
                   className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Full Name</label>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Password</label>
                 <input
-                  type="text"
+                  type="password"
                   required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="Biswajeet Admin"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
                   className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
                 />
               </div>
@@ -208,22 +204,21 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">System Role Assignment</label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as UserRole)}
-                className="w-full px-3.5 py-2 border border-slate-200 rounded-xl bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              >
-                <option value="member">Standard Group Member</option>
-                <option value="manager">Billing Manager (Split Auditor)</option>
-                <option value="admin">System Master Admin (JWT Privileges)</option>
-              </select>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Password</label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
             </div>
 
             <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl flex items-start gap-2.5 mt-2">
               <Shield className="w-4.5 h-4.5 text-indigo-500 flex-shrink-0 mt-0.5" />
               <div className="text-[11px] text-indigo-700 leading-normal">
-                Selecting <strong>System Master Admin</strong> signs a JWT with complete admin payloads, allowing you to access the Master Admin Terminal.
+                To maintain standard safety rules, newly created accounts are initialized with standard <strong>Group Member</strong> roles by default. Only designated Administrators can adjust role policies inside the Administrative Terminal.
               </div>
             </div>
 
@@ -237,9 +232,9 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           </form>
         )}
 
-        <div className="mt-6 flex justify-center items-center gap-1.5 text-slate-400 text-xs">
-          <Key className="w-3.5 h-3.5" />
-          <span>Secured via SHA-256 HMAC JWT signatures</span>
+        <div className="mt-6 flex justify-center items-center gap-1.5 text-slate-400 text-xs font-mono">
+          <Lock className="w-3.5 h-3.5 text-indigo-500" />
+          <span>Secured via PBKDF2 / SHA-256 Hashes</span>
         </div>
       </div>
     </div>

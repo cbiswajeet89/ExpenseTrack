@@ -63,6 +63,7 @@ export default function App() {
   const [pendingInvite, setPendingInvite] = useState<any | null>(null);
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
+  const [invitePassword, setInvitePassword] = useState('');
   const [inviteAccepting, setInviteAccepting] = useState(false);
 
   // Parse invite tokens and load initial system configurations
@@ -223,7 +224,7 @@ export default function App() {
   // Accept simulation join link invitation
   const handleAcceptInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteName.trim() || !inviteEmail.trim() || !pendingInvite) return;
+    if (!inviteName.trim() || !inviteEmail.trim() || !invitePassword || !pendingInvite) return;
 
     setInviteAccepting(true);
     try {
@@ -234,7 +235,8 @@ export default function App() {
         body: JSON.stringify({
           token: inviteToken,
           userName: inviteName,
-          userEmail: inviteEmail
+          userEmail: inviteEmail,
+          password: invitePassword
         })
       });
       const data = await res.json();
@@ -337,6 +339,18 @@ export default function App() {
                 readOnly
                 value={inviteEmail}
                 className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-xl text-xs font-mono text-gray-500 cursor-not-allowed focus:outline-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Set Your Account Password</label>
+              <input
+                type="password"
+                required
+                value={invitePassword}
+                onChange={(e) => setInvitePassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
               />
             </div>
 

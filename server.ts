@@ -9,8 +9,23 @@ import { createServer as createViteServer } from 'vite';
 import jwt from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { referenceTemplates } from './src/lib/referenceTemplates.js';
+import { initializeApp } from 'firebase/app';
+import { getFirestore, doc, setDoc, getDoc, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
+import fs from 'fs';
+import crypto from 'crypto';
 
 dotenv.config();
+
+// Initialize Firebase App & Firestore on Server Side
+const firebaseConfigPath = path.join(process.cwd(), 'firebase-applet-config.json');
+const firebaseConfig = JSON.parse(fs.readFileSync(firebaseConfigPath, 'utf8'));
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp, firebaseConfig.firestoreDatabaseId);
+
+// Password hashing helper
+function hashPassword(password: string): string {
+  return crypto.createHash('sha256').update(password).digest('hex');
+}
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
@@ -93,32 +108,156 @@ app.get('/api/rates', (req: Request, res: Response) => {
 });
 
 // 2. Auth Endpoints
-app.post('/api/auth/login', (req: Request, res: Response) => {
-  const { email, name, role } = req.body;
+app.post('/api/auth/register', async (req: Request, res: Response) => {
+  const { email, name, password } = req.body;
 
-  if (!email || !name) {
-    res.status(400).json({ error: 'Email and Name are required' });
+  if (!email || !name || !password) {
+    res.status(400).json({ error: 'Email, Full Name, and Password are required.' });
     return;
   }
 
-  // Generate a mock secure JWT token
-  const assignedRole = role || 'member';
-  const token = jwt.sign(
-    { id: `usr_${Math.random().toString(36).substr(2, 9)}`, email, name, role: assignedRole },
-    JWT_SECRET,
-    { expiresIn: '24h' }
-  );
+  try {
+    const formattedEmail = email.toLowerCase().trim();
+    
+    // Check if user already exists
+    const usersColl = collection(db, 'users');
+    const q = query(usersColl, where('email', '==', formattedEmail));
+    const querySnap = await getDocs(q);
 
-  res.json({
-    success: true,
-    token,
-    user: {
-      email,
-      name,
-      role: assignedRole,
-      createdAt: new Date().toISOString()
+    if (!querySnap.empty) {
+      res.status(400).json({ error: 'An account with this email already exists.' });
+      return;
     }
-  });
+
+    const userId = `usr_${Math.random().toString(36).substr(2, 9)}`;
+    const passwordHash = hashPassword(password);
+    
+    // Always assign 'member' by default!
+    const newUser = {
+      id: userId,
+      email: formattedEmail,
+      name: name.trim(),
+      role: 'member' as const,
+      passwordHash,
+      createdAt: new Date().toISOString()
+    };
+
+    await setDoc(doc(db, 'users', userId), newUser);
+
+    const token = jwt.sign(
+      { id: userId, email: newUser.email, name: newUser.name, role: newUser.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: userId,
+        email: newUser.email,
+        name: newUser.name,
+        role: newUser.role,
+        createdAt: newUser.createdAt
+      }
+    });
+  } catch (err: any) {
+    console.error('[Register API Error]:', err);
+    res.status(500).json({ error: err.message || 'Error occurred during registration.' });
+  }
+});
+
+app.post('/api/auth/login', async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    res.status(400).json({ error: 'Email and Password are required.' });
+    return;
+  }
+
+  try {
+    const formattedEmail = email.toLowerCase().trim();
+    const usersColl = collection(db, 'users');
+    const q = query(usersColl, where('email', '==', formattedEmail));
+    const querySnap = await getDocs(q);
+
+    let userDoc: any = null;
+    let userDocRef: any = null;
+
+    if (!querySnap.empty) {
+      userDocRef = querySnap.docs[0].ref;
+      userDoc = querySnap.docs[0].data();
+    }
+
+    const inputHash = hashPassword(password);
+
+    // Preseeded defaults check (fallback)
+    const isPreseededAdmin = formattedEmail === 'admin@example.com' || formattedEmail === 'cbiswajeet89@gmail.com' || formattedEmail === 'alice@example.com';
+    const isPreseededUser = isPreseededAdmin || formattedEmail === 'bob@example.com' || formattedEmail === 'charlie@example.com';
+
+    if (!userDoc) {
+      if (isPreseededUser && password === 'admin123') {
+        const userId = formattedEmail === 'cbiswajeet89@gmail.com' ? 'usr_admin' :
+                       formattedEmail === 'admin@example.com' ? 'usr_admin_default' :
+                       formattedEmail === 'alice@example.com' ? 'usr_alice' :
+                       formattedEmail === 'bob@example.com' ? 'usr_bob' : 'usr_charlie';
+        const role = isPreseededAdmin ? 'admin' : (formattedEmail === 'bob@example.com' ? 'manager' : 'member');
+        const name = formattedEmail === 'cbiswajeet89@gmail.com' ? 'Biswajeet Admin' :
+                     formattedEmail === 'admin@example.com' ? 'Default Admin' :
+                     formattedEmail === 'alice@example.com' ? 'Alice Smith' :
+                     formattedEmail === 'bob@example.com' ? 'Bob Johnson' : 'Charlie Davis';
+
+        userDoc = {
+          id: userId,
+          email: formattedEmail,
+          name,
+          role,
+          passwordHash: inputHash,
+          createdAt: new Date().toISOString()
+        };
+        await setDoc(doc(db, 'users', userId), userDoc);
+      } else {
+        res.status(401).json({ error: 'Invalid email or password.' });
+        return;
+      }
+    } else {
+      if (!userDoc.passwordHash) {
+        if (isPreseededUser && password === 'admin123') {
+          await updateDoc(userDocRef, { passwordHash: inputHash });
+          userDoc.passwordHash = inputHash;
+        } else {
+          res.status(401).json({ error: 'Authentication details need setting. Please register or contact system admin.' });
+          return;
+        }
+      }
+
+      if (userDoc.passwordHash !== inputHash) {
+        res.status(401).json({ error: 'Invalid email or password.' });
+        return;
+      }
+    }
+
+    const token = jwt.sign(
+      { id: userDoc.id, email: userDoc.email, name: userDoc.name, role: userDoc.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: userDoc.id,
+        email: userDoc.email,
+        name: userDoc.name,
+        role: userDoc.role,
+        createdAt: userDoc.createdAt
+      }
+    });
+  } catch (err: any) {
+    console.error('[Login API Error]:', err);
+    res.status(500).json({ error: err.message || 'Error occurred during authentication.' });
+  }
 });
 
 // 3. Invite Link Creation Endpoint
@@ -172,44 +311,109 @@ app.get('/api/invite/resolve/:token', (req: Request, res: Response) => {
 });
 
 // 5. Accept Invite Endpoint
-app.post('/api/invite/accept', (req: Request, res: Response) => {
-  const { token, userName, userEmail } = req.body;
+app.post('/api/invite/accept', async (req: Request, res: Response) => {
+  const { token, userName, userEmail, password } = req.body;
 
-  const inviteIndex = simulatedInvites.findIndex(inv => inv.token === token);
-  if (inviteIndex === -1) {
-    res.status(404).json({ error: 'Invalid invite token.' });
+  if (!token || !userName || !userEmail || !password) {
+    res.status(400).json({ error: 'Token, userName, userEmail, and password are required' });
     return;
   }
 
-  const invite = simulatedInvites[inviteIndex];
-  if (invite.status === 'accepted') {
-    res.status(400).json({ error: 'Invite already accepted.' });
-    return;
-  }
-
-  invite.status = 'accepted';
-
-  // Issue a JWT token for the joining user
-  const userId = `usr_${Math.random().toString(36).substr(2, 9)}`;
-  const jwtToken = jwt.sign(
-    { id: userId, email: userEmail, name: userName, role: invite.role },
-    JWT_SECRET,
-    { expiresIn: '24h' }
-  );
-
-  res.json({
-    success: true,
-    token: jwtToken,
-    groupId: invite.groupId,
-    role: invite.role,
-    user: {
-      id: userId,
-      name: userName,
-      email: userEmail,
-      role: invite.role,
-      createdAt: new Date().toISOString()
+  try {
+    const inviteIndex = simulatedInvites.findIndex(inv => inv.token === token);
+    if (inviteIndex === -1) {
+      res.status(404).json({ error: 'Invalid invite token.' });
+      return;
     }
-  });
+
+    const invite = simulatedInvites[inviteIndex];
+    if (invite.status === 'accepted') {
+      res.status(400).json({ error: 'Invite already accepted.' });
+      return;
+    }
+
+    invite.status = 'accepted';
+
+    // 1. Hash the provided password
+    const passwordHash = hashPassword(password);
+
+    // 2. See if user already exists
+    const usersColl = collection(db, 'users');
+    const q = query(usersColl, where('email', '==', userEmail.toLowerCase().trim()));
+    const querySnap = await getDocs(q);
+
+    let userId = `usr_${Math.random().toString(36).substr(2, 9)}`;
+    let userDoc: any = null;
+
+    if (!querySnap.empty) {
+      userDoc = querySnap.docs[0].data();
+      userId = userDoc.id;
+      // Update password hash if not set
+      await updateDoc(querySnap.docs[0].ref, { passwordHash });
+    } else {
+      // Create new user doc in Firestore
+      const userRef = doc(db, 'users', userId);
+      userDoc = {
+        id: userId,
+        email: userEmail.toLowerCase().trim(),
+        name: userName.trim(),
+        role: invite.role, // Joins with role specified in invite
+        passwordHash,
+        createdAt: new Date().toISOString()
+      };
+      await setDoc(userRef, userDoc);
+    }
+
+    // 3. Add user as member to Group in Firestore
+    const groupRef = doc(db, 'groups', invite.groupId);
+    const groupsColl = collection(db, 'groups');
+    const groupSnap = await getDocs(groupsColl);
+    let targetGroupDoc: any = null;
+    let targetGroupRef: any = null;
+
+    groupSnap.forEach(d => {
+      if (d.id === invite.groupId) {
+        targetGroupDoc = d.data();
+        targetGroupRef = d.ref;
+      }
+    });
+
+    if (targetGroupDoc && targetGroupRef) {
+      const currentMembers = targetGroupDoc.members || [];
+      if (!currentMembers.includes(userId)) {
+        const updatedMembers = [...currentMembers, userId];
+        const updatedRoles = { ...(targetGroupDoc.memberRoles || {}), [userId]: invite.role };
+        await updateDoc(targetGroupRef, {
+          members: updatedMembers,
+          memberRoles: updatedRoles
+        });
+      }
+    }
+
+    // 4. Issue a JWT token for the joining user
+    const jwtToken = jwt.sign(
+      { id: userId, email: userEmail, name: userName, role: invite.role },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      token: jwtToken,
+      groupId: invite.groupId,
+      role: invite.role,
+      user: {
+        id: userId,
+        name: userName,
+        email: userEmail,
+        role: invite.role,
+        createdAt: new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    console.error('Invite accept error:', err);
+    res.status(500).json({ error: err.message || 'Failed to accept invite' });
+  }
 });
 
 // 6. Secure Action: Generate Automated Monthly PDF/Markdown Report
