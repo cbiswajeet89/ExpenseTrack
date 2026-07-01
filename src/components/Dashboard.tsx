@@ -6,6 +6,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Group, Expense, User, ExpenseSplit } from '../types.js';
 import ConfirmDialog from './ConfirmDialog.js';
+import { onSnapshot, collection, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase.js';
 import { 
   ResponsiveContainer, 
   PieChart, 
@@ -85,38 +87,53 @@ export default function Dashboard({
     }
   }, [groups, activeGroupId]);
 
-  // Sync group expenses when activeGroupId changes
+  const [showDeleted, setShowDeleted] = useState(false);
+
+  // Sync group expenses in real-time when activeGroupId changes
   useEffect(() => {
-    const fetchExpenses = async () => {
-      if (!activeGroupId) {
-        setDashboardExpenses([]);
-        return;
-      }
-      setLoadingExpenses(true);
-      try {
-        const logs = await getExpensesForGroup(activeGroupId);
-        setDashboardExpenses(logs);
-      } catch (err) {
-        console.error('[Dashboard] Error fetching group expenses:', err);
-      } finally {
-        setLoadingExpenses(false);
-      }
+    if (!activeGroupId) {
+      setDashboardExpenses([]);
+      return;
+    }
+
+    setLoadingExpenses(true);
+
+    const expensesQuery = query(
+      collection(db, 'expenses'),
+      where('groupId', '==', activeGroupId)
+    );
+
+    const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
+      const list: Expense[] = [];
+      snapshot.forEach(d => {
+        list.push(d.data() as Expense);
+      });
+      // Sort by date descending
+      const sorted = list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setDashboardExpenses(sorted);
+      setLoadingExpenses(false);
+    }, (error) => {
+      console.error('[Dashboard] Real-time sync error for dashboard expenses:', error);
+      setLoadingExpenses(false);
+    });
+
+    return () => {
+      unsubscribeExpenses();
     };
-    fetchExpenses();
   }, [activeGroupId]);
 
-  // Handle live updates to group expenses (e.g., if a transaction is modified or added elsewhere)
-  useEffect(() => {
-    // If the active group on the dashboard is the globally selected group, sync local expenses
-    const activeGroup = groups.find(g => g.id === activeGroupId);
-    if (activeGroup) {
-      // If we're viewing the same group as App's scoped expenses, synchronize them
-      const globalActiveGroupId = expenses[0]?.groupId;
-      if (globalActiveGroupId === activeGroupId) {
-        setDashboardExpenses(expenses);
-      }
-    }
-  }, [expenses, activeGroupId, groups]);
+  const activeExpenses = useMemo(() => {
+    return dashboardExpenses.filter(e => !e.isDeleted);
+  }, [dashboardExpenses]);
+
+  const deletedExpenses = useMemo(() => {
+    return dashboardExpenses.filter(e => e.isDeleted);
+  }, [dashboardExpenses]);
+
+  const displayedExpenses = useMemo(() => {
+    if (showDeleted) return dashboardExpenses;
+    return activeExpenses;
+  }, [activeExpenses, dashboardExpenses, showDeleted]);
 
   // Map of userId to User object for easy lookup
   const userMap = useMemo(() => {
@@ -160,8 +177,8 @@ export default function Dashboard({
       });
     }
 
-    // Sum all expenses and subtract splits
-    dashboardExpenses.forEach(exp => {
+    // Sum all active expenses and subtract splits
+    activeExpenses.forEach(exp => {
       // Amount in selected currency
       const amountSelected = convertToSelected(exp.amount, exp.currency);
 
@@ -243,13 +260,13 @@ export default function Dashboard({
       balances,
       settlements
     };
-  }, [dashboardExpenses, activeGroup, users, userMap, selectedCurrency, currencyRates]);
+  }, [activeExpenses, activeGroup, users, userMap, selectedCurrency, currencyRates]);
 
   // Aggregate Category breakdown data in selected currency for pie chart
   const categoryData = useMemo(() => {
     const dataMap: { [cat: string]: number } = {};
 
-    dashboardExpenses.forEach(exp => {
+    activeExpenses.forEach(exp => {
       const amountSelected = convertToSelected(exp.amount, exp.currency);
       const cat = exp.category || 'Other';
       dataMap[cat] = (dataMap[cat] || 0) + amountSelected;
@@ -261,7 +278,7 @@ export default function Dashboard({
       value: Math.round(value),
       color: colors[idx % colors.length]
     }));
-  }, [dashboardExpenses, selectedCurrency, currencyRates]);
+  }, [activeExpenses, selectedCurrency, currencyRates]);
 
   // Aggregate monthly spending trends in selected currency for bar chart
   const trendData = useMemo(() => {
@@ -272,7 +289,7 @@ export default function Dashboard({
       dataMap[m] = 0;
     });
 
-    dashboardExpenses.forEach(exp => {
+    activeExpenses.forEach(exp => {
       const date = new Date(exp.date);
       const m = months[date.getMonth()];
       const amountSelected = convertToSelected(exp.amount, exp.currency);
@@ -285,7 +302,7 @@ export default function Dashboard({
       month: m,
       Amount: Math.round(dataMap[m])
     }));
-  }, [dashboardExpenses, selectedCurrency, currencyRates]);
+  }, [activeExpenses, selectedCurrency, currencyRates]);
 
   // User financial summaries converted to selected currency
   const personalBalance = balanceResolution.balances[currentUserId] || 0;
@@ -294,7 +311,7 @@ export default function Dashboard({
     let owedToYou = 0;
     let owedByYou = 0;
 
-    dashboardExpenses.forEach(exp => {
+    activeExpenses.forEach(exp => {
       if (exp.paidBy === currentUserId) {
         if (exp.splits) {
           exp.splits.forEach(split => {
@@ -317,7 +334,7 @@ export default function Dashboard({
       youAreOwed: owedToYou,
       youOwe: owedByYou
     };
-  }, [dashboardExpenses, currentUserId, selectedCurrency, currencyRates]);
+  }, [activeExpenses, currentUserId, selectedCurrency, currencyRates]);
 
   const handleSaveEditedExpense = async (expenseId: string, updatedPayload: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => {
     if (onUpdateExpense) {
@@ -485,7 +502,7 @@ export default function Dashboard({
       </div>
 
       {/* Analytics charts */}
-      {dashboardExpenses.length > 0 && (
+      {activeExpenses.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
             <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight mb-1">🍕 Allocation by Category ({selectedCurrency})</h3>
@@ -543,13 +560,26 @@ export default function Dashboard({
 
       {/* DASHBOARD LOGGED EXPENSES TABLE VIEW (Requirement #3) */}
       <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden mt-8">
-        <div className="px-6 py-4 border-b border-slate-150 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-850/50">
+        <div className="px-6 py-4 border-b border-slate-150 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-850/50">
           <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
             📜 Roommates Transaction Log Database ({activeGroup?.name || 'Group'})
           </h3>
-          <span className="text-[10px] font-semibold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/40 px-2.5 py-1 rounded-full">
-            {dashboardExpenses.length} Shared Transactions
-          </span>
+          <div className="flex items-center gap-3 flex-wrap">
+            {deletedExpenses.length > 0 && (
+              <label className="flex items-center gap-2 cursor-pointer text-[11px] select-none bg-slate-150/70 hover:bg-slate-150 px-2.5 py-1 rounded-full font-semibold text-slate-650 dark:text-slate-350 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={showDeleted}
+                  onChange={(e) => setShowDeleted(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3 h-3 cursor-pointer"
+                />
+                <span>Include Deleted ({deletedExpenses.length} for Audit Trail)</span>
+              </label>
+            )}
+            <span className="text-[10px] font-semibold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/40 px-2.5 py-1 rounded-full">
+              {displayedExpenses.length} Transactions
+            </span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -558,10 +588,10 @@ export default function Dashboard({
               <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></span>
               Synchronizing with Firestore ledger...
             </div>
-          ) : dashboardExpenses.length === 0 ? (
+          ) : displayedExpenses.length === 0 ? (
             <div className="p-12 text-center text-xs text-slate-400 font-medium flex flex-col items-center justify-center gap-1 bg-slate-50 dark:bg-slate-900">
               <Info className="w-5 h-5 text-slate-300 dark:text-slate-600" />
-              No expenses logged for this group yet. Go to the Groups tab to add some!
+              {showDeleted ? "No expenses logged for this group yet." : "No active expenses logged. Toggle \"Include Deleted\" to view soft-deleted entries."}
             </div>
           ) : (
             <table className="w-full text-left text-xs border-collapse">
@@ -571,6 +601,7 @@ export default function Dashboard({
                   <th className="px-6 py-3">Description</th>
                   <th className="px-6 py-3">Category</th>
                   <th className="px-6 py-3">Paid By</th>
+                  <th className="px-6 py-3">Created By</th>
                   <th className="px-6 py-3 text-right">Original Cost</th>
                   <th className="px-6 py-3 text-right">Total ({selectedCurrency})</th>
                   <th className="px-6 py-3 text-right">My Share ({selectedCurrency})</th>
@@ -578,8 +609,10 @@ export default function Dashboard({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900">
-                {dashboardExpenses.map((exp) => {
+                {displayedExpenses.map((exp) => {
                   const payer = userMap.get(exp.paidBy);
+                  const creator = userMap.get(exp.createdBy || exp.paidBy);
+                  const isDeleted = !!exp.isDeleted;
                   const originalCost = `${exp.currency} ${Number(exp.amount).toFixed(2)}`;
                   const totalConverted = convertToSelected(exp.amount, exp.currency);
 
@@ -589,31 +622,40 @@ export default function Dashboard({
 
                   // Split details list
                   const splitDetails = exp.splits?.map(s => {
-                    const u = userMap.get(s.userId);
-                    const amtConverted = convertToSelected(s.amount, exp.currency);
-                    return `${u?.name || 'User'}: ${currencySymbols[selectedCurrency] || selectedCurrency}${amtConverted.toFixed(2)}`;
+                     const u = userMap.get(s.userId);
+                     const amtConverted = convertToSelected(s.amount, exp.currency);
+                     return `${u?.name || 'User'}: ${currencySymbols[selectedCurrency] || selectedCurrency}${amtConverted.toFixed(2)}`;
                   }).join(', ');
 
                   // Allowed to edit / delete if they paid or they are an admin
                   const isAdmin = users.find(u => u.id === currentUserId)?.role === 'admin';
-                  const canManage = exp.paidBy === currentUserId || isAdmin;
+                  const canManage = !isDeleted && (exp.paidBy === currentUserId || isAdmin);
 
                   return (
-                    <tr key={exp.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition group border-b border-slate-100 dark:border-slate-850/60">
+                    <tr 
+                      key={exp.id} 
+                      className={`hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition group border-b border-slate-100 dark:border-slate-850/60 ${
+                        isDeleted ? 'bg-rose-50/45 dark:bg-rose-950/10 text-slate-500' : ''
+                      }`}
+                    >
                       <td className="px-6 py-4 font-mono text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
-                          {exp.date}
+                          <span className={isDeleted ? 'line-through' : ''}>{exp.date}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="text-slate-800 dark:text-slate-200 font-semibold">{exp.description}</div>
+                        <div className={`font-semibold ${isDeleted ? 'text-rose-800 line-through' : 'text-slate-800 dark:text-slate-200'}`}>
+                          {exp.description}
+                        </div>
                         <div className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 max-w-sm truncate" title={splitDetails}>
                           Splits: {splitDetails || 'None'}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-150 dark:bg-slate-800 text-gray-650 dark:text-slate-300">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                          isDeleted ? 'bg-rose-100 text-rose-700' : 'bg-gray-150 dark:bg-slate-800 text-gray-650 dark:text-slate-300'
+                        }`}>
                           {exp.category || 'Other'}
                         </span>
                       </td>
@@ -622,16 +664,28 @@ export default function Dashboard({
                           <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-850 flex items-center justify-center font-bold text-[9px] text-slate-650 dark:text-slate-350 uppercase">
                             {payer?.name?.substring(0, 2) || '??'}
                           </div>
-                          <span className="text-slate-750 dark:text-slate-300">{payer?.name || 'Unknown'}</span>
+                          <span className={`text-slate-750 dark:text-slate-300 ${isDeleted ? 'line-through' : ''}`}>
+                            {payer?.name || 'Unknown'}
+                          </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-right font-mono font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-850 flex items-center justify-center font-bold text-[9px] text-slate-650 dark:text-slate-350 uppercase">
+                            {creator?.name?.substring(0, 2) || '??'}
+                          </div>
+                          <span className={`text-slate-750 dark:text-slate-300 ${isDeleted ? 'line-through' : ''}`}>
+                            {creator?.name || 'System'}
+                          </span>
+                        </div>
+                      </td>
+                      <td className={`px-6 py-4 text-right font-mono font-semibold whitespace-nowrap ${isDeleted ? 'text-slate-400 line-through' : 'text-slate-500 dark:text-slate-400'}`}>
                         {originalCost}
                       </td>
-                      <td className="px-6 py-4 text-right font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                      <td className={`px-6 py-4 text-right font-mono font-bold whitespace-nowrap ${isDeleted ? 'text-rose-800/80 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
                         {currencySymbols[selectedCurrency] || selectedCurrency}{totalConverted.toFixed(2)}
                       </td>
-                      <td className="px-6 py-4 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
+                      <td className={`px-6 py-4 text-right font-mono font-bold whitespace-nowrap ${isDeleted ? 'text-slate-400 line-through' : 'text-indigo-600 dark:text-indigo-400'}`}>
                         {myShareAmount > 0 
                           ? `${currencySymbols[selectedCurrency] || selectedCurrency}${myShareAmount.toFixed(2)}`
                           : '-'
@@ -639,36 +693,42 @@ export default function Dashboard({
                       </td>
                       <td className="px-6 py-4 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1">
-                          {canManage && onUpdateExpense && (
-                            <button
-                              onClick={() => setEditingExpense(exp)}
-                              title="Modify transaction details"
-                              className="p-1 text-slate-400 hover:text-indigo-600 dark:text-slate-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer"
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                          )}
-                          {canManage && onDeleteExpense && (
-                            <button
-                              onClick={() => {
-                                setConfirmDialog({
-                                  isOpen: true,
-                                  title: 'Delete Expense',
-                                  message: `Are you sure you want to delete the expense "${exp.description}"? This action cannot be undone.`,
-                                  type: 'danger',
-                                  onConfirm: async () => {
-                                    setConfirmDialog(null);
-                                    await onDeleteExpense(exp.id, exp.amount);
-                                    const updated = dashboardExpenses.filter(e => e.id !== exp.id);
-                                    setDashboardExpenses(updated);
-                                  }
-                                });
-                              }}
-                              title="Delete transaction"
-                              className="p-1 text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                          {isDeleted ? (
+                            <span className="text-[9px] font-bold text-rose-650 bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 px-2 py-0.5 rounded-full uppercase tracking-wider">
+                              Deleted
+                            </span>
+                          ) : (
+                            <>
+                              {canManage && onUpdateExpense && (
+                                <button
+                                  onClick={() => setEditingExpense(exp)}
+                                  title="Modify transaction details"
+                                  className="p-1 text-slate-400 hover:text-indigo-600 dark:text-slate-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                              )}
+                              {canManage && onDeleteExpense && (
+                                <button
+                                  onClick={() => {
+                                    setConfirmDialog({
+                                      isOpen: true,
+                                      title: 'Delete Expense',
+                                      message: `Are you sure you want to delete the expense "${exp.description}"? This will move it to the audit log trail and adjust roommate balances.`,
+                                      type: 'danger',
+                                      onConfirm: async () => {
+                                        setConfirmDialog(null);
+                                        await onDeleteExpense(exp.id, exp.amount);
+                                      }
+                                    });
+                                  }}
+                                  title="Delete transaction"
+                                  className="p-1 text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
                           )}
                         </div>
                       </td>

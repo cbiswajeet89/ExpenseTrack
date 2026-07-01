@@ -53,6 +53,8 @@ export interface Expense {
   items?: ExpenseItem[];
   category: string;
   createdAt: string;
+  isDeleted?: boolean;
+  createdBy?: string;
 }
 
 export interface Invite {

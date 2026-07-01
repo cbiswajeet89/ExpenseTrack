@@ -309,11 +309,7 @@ export default function App() {
     if (!currentUser) return;
     try {
       const newGroup = await createGroupInDb(name, description, currency, currentUser.id);
-      setGroups(prev => [newGroup, ...prev]);
       setSelectedGroupId(newGroup.id);
-      // Re-sync users to display creator in membership
-      const allUsers = await getAllUsers();
-      setUsers(allUsers);
     } catch (err) {
       console.error(err);
     }
@@ -322,17 +318,11 @@ export default function App() {
   // Add split expense
   const handleAddExpense = async (expensePayload: Omit<Expense, 'id' | 'createdAt'>) => {
     try {
-      const newExpense = await createExpenseInDb(expensePayload);
-      setExpenses(prev => [newExpense, ...prev]);
-
-      // Refresh groups list to reflect newly logged totals
-      if (currentUser) {
-        const fetchGroupsPromise = currentUser.role === 'admin' 
-          ? getAllGroups() 
-          : getGroupsForUser(currentUser.id);
-        const myGroups = await fetchGroupsPromise;
-        setGroups(myGroups);
-      }
+      const finalPayload = {
+        ...expensePayload,
+        createdBy: currentUser?.id
+      };
+      await createExpenseInDb(finalPayload);
     } catch (err) {
       console.error(err);
     }
@@ -343,16 +333,6 @@ export default function App() {
     if (!selectedGroupId) return;
     try {
       await deleteExpenseFromDb(expenseId, selectedGroupId, amount);
-      setExpenses(prev => prev.filter(e => e.id !== expenseId));
-
-      // Refresh groups
-      if (currentUser) {
-        const fetchGroupsPromise = currentUser.role === 'admin' 
-          ? getAllGroups() 
-          : getGroupsForUser(currentUser.id);
-        const myGroups = await fetchGroupsPromise;
-        setGroups(myGroups);
-      }
     } catch (err) {
       console.error(err);
     }
@@ -361,17 +341,7 @@ export default function App() {
   // Update split expense
   const handleUpdateExpense = async (expenseId: string, updatedPayload: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => {
     try {
-      const updatedExpense = await updateExpenseInDb(expenseId, updatedPayload, oldAmount);
-      setExpenses(prev => prev.map(e => e.id === expenseId ? updatedExpense : e));
-
-      // Refresh groups list to reflect newly logged totals
-      if (currentUser) {
-        const fetchGroupsPromise = currentUser.role === 'admin' 
-          ? getAllGroups() 
-          : getGroupsForUser(currentUser.id);
-        const myGroups = await fetchGroupsPromise;
-        setGroups(myGroups);
-      }
+      await updateExpenseInDb(expenseId, updatedPayload, oldAmount);
     } catch (err) {
       console.error(err);
     }
@@ -381,7 +351,6 @@ export default function App() {
   const handleUpdateGroup = async (groupId: string, name: string, description: string, currency: string) => {
     try {
       await updateGroupInDb(groupId, name, description, currency);
-      setGroups(prev => prev.map(g => g.id === groupId ? { ...g, name, description, currency } : g));
     } catch (err) {
       console.error(err);
     }
@@ -391,7 +360,6 @@ export default function App() {
   const handleDeleteGroup = async (groupId: string) => {
     try {
       await deleteGroupFromDb(groupId);
-      setGroups(prev => prev.filter(g => g.id !== groupId));
       if (selectedGroupId === groupId) {
         setSelectedGroupId(null);
       }
@@ -404,19 +372,6 @@ export default function App() {
   const handleRemoveMember = async (groupId: string, userId: string) => {
     try {
       await removeMemberFromGroup(groupId, userId);
-      setGroups(prev => prev.map(g => {
-        if (g.id === groupId) {
-          const updatedMembers = g.members.filter(m => m !== userId);
-          const updatedRoles = { ...g.memberRoles };
-          delete updatedRoles[userId];
-          return {
-            ...g,
-            members: updatedMembers,
-            memberRoles: updatedRoles
-          };
-        }
-        return g;
-      }));
     } catch (err) {
       console.error(err);
       throw err;

@@ -275,7 +275,8 @@ export async function createExpenseInDb(expense: Omit<Expense, 'id' | 'createdAt
 }
 
 export async function deleteExpenseFromDb(expenseId: string, groupId: string, amount: number): Promise<void> {
-  await deleteDoc(doc(db, 'expenses', expenseId));
+  // Soft delete instead of hard delete for audit trailing
+  await updateDoc(doc(db, 'expenses', expenseId), { isDeleted: true });
 
   // Update group total
   const groupRef = doc(db, 'groups', groupId);

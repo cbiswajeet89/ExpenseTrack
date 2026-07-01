@@ -58,6 +58,21 @@ export default function GroupDetail({
     return users.filter(u => group.members.includes(u.id));
   }, [users, group.members]);
 
+  const [showDeleted, setShowDeleted] = useState(false);
+
+  const activeExpenses = useMemo(() => {
+    return expenses.filter(e => !e.isDeleted);
+  }, [expenses]);
+
+  const deletedExpenses = useMemo(() => {
+    return expenses.filter(e => e.isDeleted);
+  }, [expenses]);
+
+  const displayedExpenses = useMemo(() => {
+    if (showDeleted) return expenses;
+    return activeExpenses;
+  }, [activeExpenses, expenses, showDeleted]);
+
   // Calculate member balances for this group
   const memberBalances = useMemo(() => {
     const balances: { [userId: string]: number } = {};
@@ -67,8 +82,8 @@ export default function GroupDetail({
       balances[mId] = 0;
     });
 
-    // Sum all expenses and subtract splits
-    expenses.forEach(exp => {
+    // Sum all active expenses and subtract splits
+    activeExpenses.forEach(exp => {
       if (exp.groupId !== group.id) return;
 
       // PaidBy gets the credit
@@ -87,7 +102,7 @@ export default function GroupDetail({
     });
 
     return balances;
-  }, [expenses, group.members, group.id]);
+  }, [activeExpenses, group.members, group.id]);
 
   // Check if current user is admin of the group or global admin
   const isGroupAdmin = useMemo(() => {
@@ -575,36 +590,72 @@ export default function GroupDetail({
 
         {/* ITEMIZED LOGGED EXPENSES LIST */}
         <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-900 tracking-tight mb-4">🧾 Shared Expense Log</h3>
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 border-b border-slate-50 pb-4">
+            <h3 className="text-lg font-semibold text-gray-900 tracking-tight">🧾 Shared Expense Log</h3>
+            {deletedExpenses.length > 0 && (
+              <label className="flex items-center gap-2 cursor-pointer text-xs select-none bg-slate-100/70 hover:bg-slate-100 px-3 py-1.5 rounded-full font-medium text-slate-650 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={showDeleted}
+                  onChange={(e) => setShowDeleted(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                />
+                <span>Include Deleted ({deletedExpenses.length} for Audit Trail)</span>
+              </label>
+            )}
+          </div>
           
-          {expenses.length === 0 ? (
-            <p className="text-xs text-gray-400 py-6 text-center">No transactions logged in this group yet.</p>
+          {displayedExpenses.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">
+              {showDeleted ? "No transactions logged in this group yet." : "No active transactions logged. Check \"Include Deleted\" for audit logs if any exist."}
+            </p>
           ) : (
             <div className="divide-y divide-gray-50">
-              {expenses.map((exp) => {
+              {displayedExpenses.map((exp) => {
                 const payingUser = users.find(u => u.id === exp.paidBy);
-                const showDelete = currentUserRole === 'admin' || currentUserRole === 'manager' || exp.paidBy === currentUserId;
+                const creatorUser = users.find(u => u.id === (exp.createdBy || exp.paidBy));
+                const isDeleted = !!exp.isDeleted;
+                const showDelete = !isDeleted && (currentUserRole === 'admin' || currentUserRole === 'manager' || exp.paidBy === currentUserId);
 
                 return (
-                  <div key={exp.id} className="py-4 flex justify-between items-center text-xs group">
+                  <div 
+                    key={exp.id} 
+                    className={`py-4 flex justify-between items-center text-xs group transition-all duration-150 ${
+                      isDeleted ? 'bg-rose-50/45 border-l-4 border-rose-500 px-3 my-1.5 rounded-xl opacity-85' : ''
+                    }`}
+                  >
                     <div className="space-y-1">
-                      <h4 className="font-semibold text-gray-800">{exp.description}</h4>
-                      <div className="flex items-center gap-2 text-[10px] text-gray-400">
-                        <span className="bg-gray-100 px-1.5 py-0.5 rounded uppercase font-bold tracking-wide font-mono text-[9px]">
+                      <h4 className={`font-semibold ${isDeleted ? 'text-rose-800 line-through' : 'text-gray-800'}`}>
+                        {exp.description}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
+                        <span className={`px-1.5 py-0.5 rounded uppercase font-bold tracking-wide font-mono text-[9px] ${
+                          isDeleted ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-600'
+                        }`}>
                           {exp.category}
                         </span>
                         <span>• Paid by <strong>{payingUser?.name || 'Unknown'}</strong></span>
+                        <span>• Created by <strong>{creatorUser?.name || 'System'}</strong></span>
                         <span>• {exp.date}</span>
+                        {isDeleted && (
+                          <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider bg-rose-100/50 px-2 py-0.5 rounded-full">
+                            Deleted (Audit trail preserved)
+                          </span>
+                        )}
                       </div>
 
                       {/* Display sub-items if present */}
                       {exp.items && exp.items.length > 0 && (
-                        <div className="mt-1.5 bg-gray-50/50 p-2 rounded-lg space-y-1 text-[10px]">
-                          <span className="font-semibold text-gray-500 block uppercase tracking-wider text-[8px]">
+                        <div className={`mt-1.5 p-2 rounded-lg space-y-1 text-[10px] ${
+                          isDeleted ? 'bg-rose-100/20' : 'bg-gray-50/50'
+                        }`}>
+                          <span className={`font-semibold block uppercase tracking-wider text-[8px] ${
+                            isDeleted ? 'text-rose-500' : 'text-gray-500'
+                          }`}>
                             Itemized breakdown:
                           </span>
                           {exp.items.map((it, idx) => (
-                            <div key={idx} className="flex justify-between text-gray-500">
+                            <div key={idx} className={`flex justify-between ${isDeleted ? 'text-rose-700/70 line-through' : 'text-gray-500'}`}>
                               <span>- {it.description}</span>
                               <span className="font-mono">{group.currency} {it.amount.toFixed(2)}</span>
                             </div>
@@ -615,7 +666,7 @@ export default function GroupDetail({
 
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <span className="font-bold font-mono text-gray-900">
+                        <span className={`font-bold font-mono ${isDeleted ? 'text-rose-800 line-through' : 'text-gray-900'}`}>
                           {exp.currency} {Number(exp.amount).toFixed(2)}
                         </span>
                         <p className="text-[9px] text-gray-400 font-medium uppercase mt-0.5">
@@ -623,24 +674,24 @@ export default function GroupDetail({
                         </p>
                       </div>
 
-                      {showDelete && onUpdateExpense && (
+                      {!isDeleted && showDelete && onUpdateExpense && (
                         <button
                           type="button"
                           onClick={() => setEditingExpense(exp)}
                           title="Modify transaction details"
-                          className="text-gray-400 hover:text-indigo-650 transition opacity-0 group-hover:opacity-100 mr-1"
+                          className="text-gray-400 hover:text-indigo-650 transition opacity-0 group-hover:opacity-100 mr-1 cursor-pointer"
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
                       )}
-                      {showDelete && (
+                      {!isDeleted && showDelete && (
                         <button
                           type="button"
                           onClick={() => {
                             setConfirmDialog({
                               isOpen: true,
                               title: 'Delete Expense',
-                              message: `Are you sure you want to delete this expense of ${exp.currency} ${Number(exp.amount).toFixed(2)} for "${exp.description}"?`,
+                              message: `Are you sure you want to delete this expense of ${exp.currency} ${Number(exp.amount).toFixed(2)} for "${exp.description}"? This will move it to the audit log trail and adjust group total calculations.`,
                               type: 'danger',
                               onConfirm: () => {
                                 setConfirmDialog(null);
@@ -648,7 +699,7 @@ export default function GroupDetail({
                               }
                             });
                           }}
-                          className="text-gray-400 hover:text-red-500 transition opacity-0 group-hover:opacity-100"
+                          className="text-gray-400 hover:text-red-500 transition opacity-0 group-hover:opacity-100 cursor-pointer"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
