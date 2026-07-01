@@ -15,28 +15,27 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const preseededUsers = [
-    { email: 'admin@example.com', name: 'Default Admin', role: 'admin' as const },
-    { email: 'cbiswajeet89@gmail.com', name: 'Biswajeet Admin', role: 'admin' as const },
-    { email: 'alice@example.com', name: 'Alice Smith', role: 'admin' as const },
-    { email: 'bob@example.com', name: 'Bob Johnson', role: 'manager' as const },
-    { email: 'charlie@example.com', name: 'Charlie Davis', role: 'member' as const }
-  ];
-
-  const handleAuth = async (e?: React.FormEvent, selectedUser?: typeof preseededUsers[0]) => {
-    if (e) e.preventDefault();
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
     setError('');
     setLoading(true);
 
-    const targetEmail = selectedUser ? selectedUser.email : email;
-    const targetPassword = selectedUser ? 'admin123' : password;
+    const targetEmail = email.trim();
+    const targetPassword = password;
 
-    if (!targetEmail || !targetPassword || (isRegistering && !name)) {
-      setError(isRegistering ? 'Please provide email, name, and password.' : 'Please provide both email and password.');
+    if (!targetEmail || !targetPassword || (isRegistering && (!name.trim() || !confirmPassword))) {
+      setError(isRegistering ? 'Please fill in all fields.' : 'Please provide both email and password.');
+      setLoading(false);
+      return;
+    }
+
+    if (isRegistering && targetPassword !== confirmPassword) {
+      setError('Passwords do not match.');
       setLoading(false);
       return;
     }
@@ -44,7 +43,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
     try {
       const endpoint = isRegistering ? '/api/auth/register' : '/api/auth/login';
       const bodyPayload = isRegistering 
-        ? { email: targetEmail, name, password: targetPassword } 
+        ? { email: targetEmail, name: name.trim(), password: targetPassword } 
         : { email: targetEmail, password: targetPassword };
 
       const response = await fetch(endpoint, {
@@ -101,14 +100,14 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           <button
             type="button"
             className={`flex-1 pb-3 transition-colors ${!isRegistering ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-            onClick={() => { setIsRegistering(false); setError(''); setPassword(''); }}
+            onClick={() => { setIsRegistering(false); setError(''); setPassword(''); setConfirmPassword(''); }}
           >
-            Sign In / Quick Sandbox
+            Sign In
           </button>
           <button
             type="button"
             className={`flex-1 pb-3 transition-colors ${isRegistering ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}
-            onClick={() => { setIsRegistering(true); setError(''); setPassword(''); }}
+            onClick={() => { setIsRegistering(true); setError(''); setPassword(''); setConfirmPassword(''); }}
           >
             Create New Account
           </button>
@@ -116,37 +115,7 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
 
         {!isRegistering ? (
           <div>
-            {/* Quick Sandbox Profiles */}
-            <div className="mb-6">
-              <label className="block text-[10px] font-bold text-slate-450 uppercase tracking-wider mb-3">
-                ⚡ Quick Sign-In (Default Password: <code className="bg-slate-100 px-1 py-0.5 rounded text-[10px] font-mono text-slate-600 select-all">admin123</code>)
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {preseededUsers.map((user) => (
-                  <button
-                    key={user.email}
-                    onClick={() => handleAuth(undefined, user)}
-                    disabled={loading}
-                    className="flex flex-col items-start p-3 bg-slate-50 hover:bg-indigo-50/50 hover:border-indigo-200 border border-slate-150 rounded-xl transition text-left disabled:opacity-50 group"
-                  >
-                    <span className="text-xs font-semibold text-slate-700 group-hover:text-indigo-600 transition">
-                      {user.name.split(' ')[0]}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono mt-0.5">
-                      {user.role.toUpperCase()}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="relative flex py-2 items-center">
-              <div className="flex-grow border-t border-slate-100"></div>
-              <span className="flex-shrink mx-4 text-slate-400 text-[10px] uppercase tracking-wider">or login credentials</span>
-              <div className="flex-grow border-t border-slate-100"></div>
-            </div>
-
-            <form onSubmit={handleAuth} className="space-y-4 mt-4">
+            <form onSubmit={handleAuth} className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-slate-600 mb-1">Email Address</label>
                 <input
@@ -210,6 +179,17 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">Confirm Password</label>
+              <input
+                type="password"
+                required
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
               />

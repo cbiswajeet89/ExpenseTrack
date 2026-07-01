@@ -24,6 +24,7 @@ import GroupsList from './components/GroupsList.js';
 import GroupDetail from './components/GroupDetail.js';
 import AdminPanel from './components/AdminPanel.js';
 import ReferenceViewer from './components/ReferenceViewer.js';
+import ProfileSettings from './components/ProfileSettings.js';
 
 // Icons
 import { 
@@ -35,7 +36,8 @@ import {
   Code2, 
   UserPlus, 
   ArrowRight,
-  ShieldAlert
+  ShieldAlert,
+  UserCheck
 } from 'lucide-react';
 
 export default function App() {
@@ -55,7 +57,7 @@ export default function App() {
   });
 
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'groups' | 'admin' | 'reference'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'groups' | 'admin' | 'reference' | 'profile'>('dashboard');
   
   // App initialization states
   const [loading, setLoading] = useState(true);
@@ -64,6 +66,7 @@ export default function App() {
   const [inviteName, setInviteName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [invitePassword, setInvitePassword] = useState('');
+  const [inviteConfirmPassword, setInviteConfirmPassword] = useState('');
   const [inviteAccepting, setInviteAccepting] = useState(false);
 
   // Parse invite tokens and load initial system configurations
@@ -221,10 +224,22 @@ export default function App() {
     }
   };
 
+  // Synchronize profile updates on current user & list
+  const handleProfileUpdate = (updatedUser: User, newToken: string) => {
+    setCurrentUser(updatedUser);
+    setJwtToken(newToken);
+    setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
+  };
+
   // Accept simulation join link invitation
   const handleAcceptInvite = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inviteName.trim() || !inviteEmail.trim() || !invitePassword || !pendingInvite) return;
+
+    if (invitePassword !== inviteConfirmPassword) {
+      alert('Passwords do not match.');
+      return;
+    }
 
     setInviteAccepting(true);
     try {
@@ -354,6 +369,18 @@ export default function App() {
               />
             </div>
 
+            <div>
+              <label className="block text-xs font-semibold text-gray-600 mb-1">Confirm Your Password</label>
+              <input
+                type="password"
+                required
+                value={inviteConfirmPassword}
+                onChange={(e) => setInviteConfirmPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+              />
+            </div>
+
             <button
               type="submit"
               disabled={inviteAccepting}
@@ -441,6 +468,19 @@ export default function App() {
                     <span>Shared Groups</span>
                   </button>
                 </li>
+                <li>
+                  <button
+                    onClick={() => setActiveTab('profile')}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-all duration-150 ${
+                      activeTab === 'profile'
+                        ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/10'
+                        : 'hover:bg-slate-800 hover:text-white text-slate-400'
+                    }`}
+                  >
+                    <UserCheck className="w-4 h-4" />
+                    <span>My Profile</span>
+                  </button>
+                </li>
               </ul>
             </div>
 
@@ -480,15 +520,19 @@ export default function App() {
 
         {/* User Context Card at Bottom of Sidebar */}
         <div className="p-4 bg-slate-850 rounded-xl border border-slate-800/80">
-          <div className="flex items-center gap-3 mb-2.5 overflow-hidden">
+          <button
+            onClick={() => setActiveTab('profile')}
+            className="flex items-center gap-3 mb-2.5 overflow-hidden text-left w-full hover:bg-slate-800/50 p-1.5 rounded-lg transition"
+            title="Update Profile details"
+          >
             <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold shrink-0 text-xs uppercase shadow-inner">
               {currentUser.name.substring(0, 2)}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-xs text-white font-semibold truncate leading-tight">{currentUser.name}</p>
+              <p className="text-xs text-white font-semibold truncate leading-tight hover:underline">{currentUser.name}</p>
               <p className="text-[10px] text-slate-400 capitalize truncate mt-0.5">{currentUser.role}</p>
             </div>
-          </div>
+          </button>
           <button
             onClick={handleLogout}
             className="w-full py-2 bg-slate-750 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-medium transition-colors"
@@ -515,6 +559,13 @@ export default function App() {
           <span className="text-[9px]">Groups</span>
         </button>
         <button
+          onClick={() => setActiveTab('profile')}
+          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'profile' ? 'text-indigo-600 font-semibold' : 'text-slate-400'}`}
+        >
+          <UserCheck className="w-4.5 h-4.5" />
+          <span className="text-[9px]">Profile</span>
+        </button>
+        <button
           onClick={() => setActiveTab('admin')}
           className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'admin' ? 'text-indigo-600 font-semibold' : 'text-slate-400'}`}
         >
@@ -539,6 +590,7 @@ export default function App() {
             <h2 className="text-sm font-bold text-slate-800 tracking-tight uppercase">
               {activeTab === 'dashboard' && 'Dashboard Overview'}
               {activeTab === 'groups' && 'Shared Ledger Groups'}
+              {activeTab === 'profile' && 'My Account Profile'}
               {activeTab === 'admin' && 'Master Administration'}
               {activeTab === 'reference' && 'Export Tech Stack'}
             </h2>
@@ -614,6 +666,14 @@ export default function App() {
               jwtToken={jwtToken}
               users={users}
               onUpdateUserRole={handleUpdateUserRole}
+            />
+          )}
+
+          {activeTab === 'profile' && (
+            <ProfileSettings
+              currentUser={currentUser}
+              jwtToken={jwtToken}
+              onProfileUpdate={handleProfileUpdate}
             />
           )}
 

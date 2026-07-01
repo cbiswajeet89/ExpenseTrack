@@ -260,6 +260,66 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   }
 });
 
+app.put('/api/users/profile', authenticateJWT, async (req: AuthenticatedRequest, res: Response) => {
+  const { name, password } = req.body;
+  const userId = req.user?.id;
+
+  if (!userId) {
+    res.status(401).json({ error: 'Unauthorized: User ID not found in token' });
+    return;
+  }
+
+  try {
+    const userRef = doc(db, 'users', userId);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      res.status(404).json({ error: 'User profile not found in database.' });
+      return;
+    }
+
+    const userData = userSnap.data();
+    const updatePayload: any = {};
+
+    if (name && typeof name === 'string' && name.trim()) {
+      updatePayload.name = name.trim();
+    }
+
+    if (password && typeof password === 'string' && password) {
+      updatePayload.passwordHash = hashPassword(password);
+    }
+
+    if (Object.keys(updatePayload).length > 0) {
+      await updateDoc(userRef, updatePayload);
+    }
+
+    const finalName = updatePayload.name || userData.name;
+    const finalRole = userData.role;
+    const finalEmail = userData.email;
+
+    const token = jwt.sign(
+      { id: userId, email: finalEmail, name: finalName, role: finalRole },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: userId,
+        email: finalEmail,
+        name: finalName,
+        role: finalRole,
+        createdAt: userData.createdAt || new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    console.error('[Update Profile API Error]:', err);
+    res.status(500).json({ error: err.message || 'Error occurred while updating profile.' });
+  }
+});
+
 // 3. Invite Link Creation Endpoint
 app.post('/api/invite/send', (req: Request, res: Response) => {
   const { groupId, groupName, email, role } = req.body;
