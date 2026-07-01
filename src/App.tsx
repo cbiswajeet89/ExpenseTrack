@@ -273,8 +273,12 @@ export default function App() {
       snapshot.forEach(d => {
         list.push(d.data() as Expense);
       });
-      // Sort by date descending
-      const sorted = list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      // Sort by transaction creation time descending (newest first), falling back to date
+      const sorted = list.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
+        return timeB - timeA;
+      });
       setExpenses(sorted);
     }, (error) => {
       console.error('Real-time sync error for expenses:', error);

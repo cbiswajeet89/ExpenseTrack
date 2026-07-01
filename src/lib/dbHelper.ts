@@ -279,8 +279,12 @@ export async function getExpensesForGroup(groupId: string): Promise<Expense[]> {
         list.push(exp);
       }
     });
-    // Sort by date descending
-    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Sort by transaction creation time descending (newest first), falling back to date
+    return list.sort((a, b) => {
+      const timeA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
+      const timeB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
+      return timeB - timeA;
+    });
   } catch (err) {
     console.error('[Firestore] getExpensesForGroup error:', err);
     return [];

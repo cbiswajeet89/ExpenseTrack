@@ -73,6 +73,7 @@ export default function Dashboard({
 
   // Selected Group state for Dashboard scoping
   const [activeGroupId, setActiveGroupId] = useState<string>('');
+  const [settlementFilter, setSettlementFilter] = useState<'all' | 'me'>('me');
   const [dashboardExpenses, setDashboardExpenses] = useState<Expense[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -126,8 +127,12 @@ export default function Dashboard({
       snapshot.forEach(d => {
         list.push(d.data() as Expense);
       });
-      // Sort by date descending
-      const sorted = list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      // Sort by transaction creation time descending (newest first), falling back to date
+      const sorted = list.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
+        return timeB - timeA;
+      });
       setDashboardExpenses(sorted);
       setLoadingExpenses(false);
     }, (error) => {
@@ -200,8 +205,8 @@ export default function Dashboard({
       let valB: any;
 
       if (sortField === 'date') {
-        valA = new Date(a.date).getTime();
-        valB = new Date(b.date).getTime();
+        valA = a.createdAt ? new Date(a.createdAt).getTime() : new Date(a.date).getTime();
+        valB = b.createdAt ? new Date(b.createdAt).getTime() : new Date(b.date).getTime();
       } else if (sortField === 'description') {
         valA = a.description.toLowerCase();
         valB = b.description.toLowerCase();
@@ -509,42 +514,94 @@ export default function Dashboard({
               Greedy Routing
             </span>
           </div>
-          <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
             Minimized debt clearance matrix calculated in **{selectedCurrency}** to solve all group splits.
           </p>
 
-          {balanceResolution.settlements.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-10 bg-gray-50 dark:bg-slate-850/50 rounded-2xl border border-dashed border-gray-200 dark:border-slate-800">
-              <CheckCircle2 className="w-8 h-8 text-emerald-500 dark:text-emerald-400 mb-2" />
-              <p className="text-xs font-medium text-gray-600 dark:text-slate-300">Perfect Equilibrium!</p>
-              <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1">All roommates are completely settled.</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {balanceResolution.settlements.map((settle, i) => (
-                <div 
-                  key={i} 
-                  className={`flex items-center justify-between p-3.5 border rounded-xl text-xs transition ${
-                    settle.fromId === currentUserId 
-                      ? 'border-red-100 dark:border-red-950/25 bg-red-50/20 dark:bg-red-950/10' 
-                      : settle.toId === currentUserId 
-                      ? 'border-emerald-100 dark:border-emerald-950/25 bg-emerald-50/20 dark:bg-emerald-950/10' 
-                      : 'border-gray-100 dark:border-slate-800 bg-gray-50/30 dark:bg-slate-850/20'
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.fromName}</span>
-                    <span className="text-gray-400 dark:text-slate-500">pays</span>
-                    <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.toName}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 font-mono">
-                    <span className="font-semibold text-gray-900 dark:text-white">{currencySymbols[selectedCurrency] || selectedCurrency}{settle.amountSelected.toFixed(2)}</span>
-                    <span className="text-[10px] text-gray-400 dark:text-slate-500 uppercase">{selectedCurrency}</span>
-                  </div>
+          {/* Settlement Sub-Filter Tabs */}
+          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-semibold select-none border border-slate-200/40 dark:border-slate-700 mb-4">
+            <button
+              type="button"
+              onClick={() => setSettlementFilter('me')}
+              className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
+                settlementFilter === 'me'
+                  ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              My Dues Only
+            </button>
+            <button
+              type="button"
+              onClick={() => setSettlementFilter('all')}
+              className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
+                settlementFilter === 'all'
+                  ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-white shadow-xs'
+                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              All Roommate Dues
+            </button>
+          </div>
+
+          {(() => {
+            const displayedSettlements = settlementFilter === 'me'
+              ? balanceResolution.settlements.filter(s => s.fromId === currentUserId || s.toId === currentUserId)
+              : balanceResolution.settlements;
+
+            if (displayedSettlements.length === 0) {
+              return (
+                <div className="flex flex-col items-center justify-center py-10 bg-gray-50 dark:bg-slate-850/50 rounded-2xl border border-dashed border-gray-200 dark:border-slate-800">
+                  <CheckCircle2 className="w-8 h-8 text-emerald-500 dark:text-emerald-400 mb-2" />
+                  <p className="text-xs font-medium text-gray-600 dark:text-slate-300">
+                    {settlementFilter === 'me' ? 'No personal dues left!' : 'Perfect Equilibrium!'}
+                  </p>
+                  <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1 text-center">
+                    {settlementFilter === 'me' 
+                      ? 'You are completely settled with all roommates in this group.' 
+                      : 'All roommates are completely settled.'}
+                  </p>
                 </div>
-              ))}
-            </div>
-          )}
+              );
+            }
+
+            return (
+              <div className="space-y-3">
+                {displayedSettlements.map((settle, i) => (
+                  <div 
+                    key={i} 
+                    className={`flex items-center justify-between p-3.5 border rounded-xl text-xs transition ${
+                      settle.fromId === currentUserId 
+                        ? 'border-red-100 dark:border-red-950/25 bg-red-50/20 dark:bg-red-950/10' 
+                        : settle.toId === currentUserId 
+                        ? 'border-emerald-100 dark:border-emerald-950/25 bg-emerald-50/20 dark:bg-emerald-950/10' 
+                        : 'border-gray-100 dark:border-slate-800 bg-gray-50/30 dark:bg-slate-850/20'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5">
+                      {settle.fromId === currentUserId ? (
+                        <span className="font-semibold text-red-650 dark:text-red-400">You</span>
+                      ) : (
+                        <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.fromName}</span>
+                      )}
+                      <span className="text-gray-400 dark:text-slate-500">pays</span>
+                      {settle.toId === currentUserId ? (
+                        <span className="font-semibold text-emerald-650 dark:text-emerald-400">You</span>
+                      ) : (
+                        <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.toName}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1.5 font-mono">
+                      <span className={`font-semibold ${settle.fromId === currentUserId ? 'text-red-600 dark:text-red-400' : settle.toId === currentUserId ? 'text-emerald-650 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>
+                        {currencySymbols[selectedCurrency] || selectedCurrency}{settle.amountSelected.toFixed(2)}
+                      </span>
+                      <span className="text-[10px] text-gray-400 dark:text-slate-500 uppercase">{selectedCurrency}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
 
         {/* Ledger Breakdown by User */}
