@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useMemo } from 'react';
-import { Group, Expense, User } from '../types.js';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Group, Expense, User, ExpenseSplit } from '../types.js';
+import ConfirmDialog from './ConfirmDialog.js';
 import { 
   ResponsiveContainer, 
   PieChart, 
@@ -18,59 +19,163 @@ import {
   CartesianGrid, 
   Legend 
 } from 'recharts';
-import { TrendingUp, ArrowDownRight, ArrowUpRight, CheckCircle2, AlertCircle, Sparkles } from 'lucide-react';
+import { 
+  TrendingUp, 
+  ArrowDownRight, 
+  ArrowUpRight, 
+  CheckCircle2, 
+  AlertCircle, 
+  Sparkles, 
+  Pencil, 
+  Trash2, 
+  Coins, 
+  Filter, 
+  Info,
+  Calendar
+} from 'lucide-react';
+import { getExpensesForGroup } from '../lib/dbHelper.js';
+import EditExpenseModal from './EditExpenseModal.js';
 
 interface DashboardProps {
   groups: Group[];
-  expenses: Expense[];
+  expenses: Expense[]; // Active group expenses passed from App level
   users: User[];
   currentUserId: string;
   currencyRates: { [key: string]: number };
+  onUpdateExpense?: (expenseId: string, updatedExpense: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => Promise<void>;
+  onDeleteExpense?: (expenseId: string, amount: number) => Promise<void>;
 }
 
-export default function Dashboard({ groups, expenses, users, currentUserId, currencyRates }: DashboardProps) {
-  // Map of userId to User object for easy name lookup
+export default function Dashboard({ 
+  groups, 
+  expenses, 
+  users, 
+  currentUserId, 
+  currencyRates,
+  onUpdateExpense,
+  onDeleteExpense
+}: DashboardProps) {
+  // Currency switcher state
+  const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('selectedCurrency') || 'INR');
+
+  const handleCurrencyChange = (currCode: string) => {
+    setSelectedCurrency(currCode);
+    localStorage.setItem('selectedCurrency', currCode);
+  };
+
+  // Selected Group state for Dashboard scoping
+  const [activeGroupId, setActiveGroupId] = useState<string>('');
+  const [dashboardExpenses, setDashboardExpenses] = useState<Expense[]>([]);
+  const [loadingExpenses, setLoadingExpenses] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type?: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  } | null>(null);
+
+  // Initialize group selection
+  useEffect(() => {
+    if (groups.length > 0 && !activeGroupId) {
+      // Find default group to pre-select
+      const preseeded = groups.find(g => g.id === 'grp_apartment_3b');
+      setActiveGroupId(preseeded ? preseeded.id : groups[0].id);
+    }
+  }, [groups, activeGroupId]);
+
+  // Sync group expenses when activeGroupId changes
+  useEffect(() => {
+    const fetchExpenses = async () => {
+      if (!activeGroupId) {
+        setDashboardExpenses([]);
+        return;
+      }
+      setLoadingExpenses(true);
+      try {
+        const logs = await getExpensesForGroup(activeGroupId);
+        setDashboardExpenses(logs);
+      } catch (err) {
+        console.error('[Dashboard] Error fetching group expenses:', err);
+      } finally {
+        setLoadingExpenses(false);
+      }
+    };
+    fetchExpenses();
+  }, [activeGroupId]);
+
+  // Handle live updates to group expenses (e.g., if a transaction is modified or added elsewhere)
+  useEffect(() => {
+    // If the active group on the dashboard is the globally selected group, sync local expenses
+    const activeGroup = groups.find(g => g.id === activeGroupId);
+    if (activeGroup) {
+      // If we're viewing the same group as App's scoped expenses, synchronize them
+      const globalActiveGroupId = expenses[0]?.groupId;
+      if (globalActiveGroupId === activeGroupId) {
+        setDashboardExpenses(expenses);
+      }
+    }
+  }, [expenses, activeGroupId, groups]);
+
+  // Map of userId to User object for easy lookup
   const userMap = useMemo(() => {
     return new Map<string, User>(users.map(u => [u.id, u]));
   }, [users]);
 
-  // Convert an amount to USD for unified system chart metrics
-  const convertToUSD = (amount: number, fromCurrency: string) => {
-    const rate = currencyRates[fromCurrency] || 1;
-    return amount / rate;
+  // Currency Symbols configuration
+  const currencySymbols: { [key: string]: string } = {
+    USD: '$',
+    EUR: '€',
+    INR: '₹',
+    GBP: '£',
+    CAD: 'CA$',
+    AUD: 'A$',
+    JPY: '¥'
   };
 
-  // Convert an amount from USD to group currency
-  const convertFromUSD = (amountUSD: number, toCurrency: string) => {
-    const rate = currencyRates[toCurrency] || 1;
-    return amountUSD * rate;
+  // Convert from any currency to the selected dashboard currency on the fly
+  const convertToSelected = (amount: number, fromCurrency: string) => {
+    const amountUSD = amount / (currencyRates[fromCurrency] || 1);
+    return amountUSD * (currencyRates[selectedCurrency] || 1);
   };
 
-  // Resolve all balances and optimize settlement routes
+  // Get active group metadata
+  const activeGroup = useMemo(() => {
+    return groups.find(g => g.id === activeGroupId) || null;
+  }, [groups, activeGroupId]);
+
+  // Resolve all balances and optimize settlement routes in selected currency
   const balanceResolution = useMemo(() => {
     const balances: { [userId: string]: number } = {};
 
-    // Initialize all users with 0
-    users.forEach(u => {
-      balances[u.id] = 0;
-    });
+    // Initialize only group members with 0
+    if (activeGroup) {
+      activeGroup.members.forEach(mId => {
+        balances[mId] = 0;
+      });
+    } else {
+      users.forEach(u => {
+        balances[u.id] = 0;
+      });
+    }
 
     // Sum all expenses and subtract splits
-    expenses.forEach(exp => {
-      // Amount in USD for universal comparison, or if we want standard group currency we can keep it USD-based
-      const amountUSD = convertToUSD(exp.amount, exp.currency);
+    dashboardExpenses.forEach(exp => {
+      // Amount in selected currency
+      const amountSelected = convertToSelected(exp.amount, exp.currency);
 
       // PaidBy gets the credit
       if (balances[exp.paidBy] !== undefined) {
-        balances[exp.paidBy] += amountUSD;
+        balances[exp.paidBy] += amountSelected;
       }
 
       // Splits get the debit
       if (exp.splits) {
         exp.splits.forEach(split => {
-          const splitAmountUSD = convertToUSD(split.amount, exp.currency);
+          const splitAmountSelected = convertToSelected(split.amount, exp.currency);
           if (balances[split.userId] !== undefined) {
-            balances[split.userId] -= splitAmountUSD;
+            balances[split.userId] -= splitAmountSelected;
           }
         });
       }
@@ -84,7 +189,6 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
       const u = userMap.get(userId);
       if (!u) return;
       
-      // Filter out small floating point dust
       if (Math.abs(bal) < 0.01) {
         balances[userId] = 0;
         return;
@@ -103,17 +207,15 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
       fromName: string;
       toId: string;
       toName: string;
-      amountUSD: number;
+      amountSelected: number;
     }> = [];
 
-    // Copy to avoid mutating
     const dList = debtors.map(d => ({ ...d }));
     const cList = creditors.map(c => ({ ...c }));
 
     let safetyVal = 0;
     while (dList.length > 0 && cList.length > 0 && safetyVal < 500) {
       safetyVal++;
-      // Sort to settle largest amounts first
       dList.sort((a, b) => b.amount - a.amount);
       cList.sort((a, b) => b.amount - a.amount);
 
@@ -127,7 +229,7 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
         fromName: debtor.name,
         toId: creditor.id,
         toName: creditor.name,
-        amountUSD: settleAmount
+        amountSelected: settleAmount
       });
 
       debtor.amount -= settleAmount;
@@ -141,16 +243,16 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
       balances,
       settlements
     };
-  }, [expenses, users, userMap, currencyRates]);
+  }, [dashboardExpenses, activeGroup, users, userMap, selectedCurrency, currencyRates]);
 
-  // Aggregate Category breakdown data for pie chart
+  // Aggregate Category breakdown data in selected currency for pie chart
   const categoryData = useMemo(() => {
     const dataMap: { [cat: string]: number } = {};
 
-    expenses.forEach(exp => {
-      const amountUSD = convertToUSD(exp.amount, exp.currency);
+    dashboardExpenses.forEach(exp => {
+      const amountSelected = convertToSelected(exp.amount, exp.currency);
       const cat = exp.category || 'Other';
-      dataMap[cat] = (dataMap[cat] || 0) + amountUSD;
+      dataMap[cat] = (dataMap[cat] || 0) + amountSelected;
     });
 
     const colors = ['#10b981', '#6366f1', '#f59e0b', '#ec4899', '#8b5cf6', '#3b82f6', '#14b8a6'];
@@ -159,48 +261,45 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
       value: Math.round(value),
       color: colors[idx % colors.length]
     }));
-  }, [expenses, currencyRates]);
+  }, [dashboardExpenses, selectedCurrency, currencyRates]);
 
-  // Aggregate monthly spending trends for bar chart
+  // Aggregate monthly spending trends in selected currency for bar chart
   const trendData = useMemo(() => {
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const dataMap: { [month: string]: number } = {};
 
-    // Initialize all months to 0
     months.forEach(m => {
       dataMap[m] = 0;
     });
 
-    expenses.forEach(exp => {
+    dashboardExpenses.forEach(exp => {
       const date = new Date(exp.date);
       const m = months[date.getMonth()];
-      const amountUSD = convertToUSD(exp.amount, exp.currency);
+      const amountSelected = convertToSelected(exp.amount, exp.currency);
       if (dataMap[m] !== undefined) {
-        dataMap[m] += amountUSD;
+        dataMap[m] += amountSelected;
       }
     });
 
-    // Filter to months that have values or are the current window
     return months.map(m => ({
       month: m,
       Amount: Math.round(dataMap[m])
     }));
-  }, [expenses, currencyRates]);
+  }, [dashboardExpenses, selectedCurrency, currencyRates]);
 
+  // User financial summaries converted to selected currency
   const personalBalance = balanceResolution.balances[currentUserId] || 0;
 
-  // Compute "You are owed" (gross positive splits from others when you paid) 
-  // and "You owe" (gross negative splits to others when others paid)
   const { youAreOwed, youOwe } = useMemo(() => {
     let owedToYou = 0;
     let owedByYou = 0;
 
-    expenses.forEach(exp => {
+    dashboardExpenses.forEach(exp => {
       if (exp.paidBy === currentUserId) {
         if (exp.splits) {
           exp.splits.forEach(split => {
             if (split.userId !== currentUserId) {
-              owedToYou += convertToUSD(split.amount, exp.currency);
+              owedToYou += convertToSelected(split.amount, exp.currency);
             }
           });
         }
@@ -208,7 +307,7 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
         if (exp.splits) {
           const mySplit = exp.splits.find(s => s.userId === currentUserId);
           if (mySplit) {
-            owedByYou += convertToUSD(mySplit.amount, exp.currency);
+            owedByYou += convertToSelected(mySplit.amount, exp.currency);
           }
         }
       }
@@ -218,65 +317,111 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
       youAreOwed: owedToYou,
       youOwe: owedByYou
     };
-  }, [expenses, currentUserId, currencyRates]);
+  }, [dashboardExpenses, currentUserId, selectedCurrency, currencyRates]);
+
+  const handleSaveEditedExpense = async (expenseId: string, updatedPayload: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => {
+    if (onUpdateExpense) {
+      await onUpdateExpense(expenseId, updatedPayload, oldAmount);
+      // Refresh the group list
+      const logs = await getExpensesForGroup(activeGroupId);
+      setDashboardExpenses(logs);
+    }
+  };
 
   return (
     <div className="space-y-6 font-sans">
-      {/* Overview Cards (Theme Mode) */}
+      {/* TOOLBAR CONTROLS */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-4 rounded-2xl">
+        <div className="flex items-center gap-2">
+          <Filter className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Select Shared Room:</span>
+          <select
+            value={activeGroupId}
+            onChange={(e) => setActiveGroupId(e.target.value)}
+            className="px-3 py-1.5 border border-slate-250 dark:border-slate-700 bg-white dark:bg-slate-850 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          >
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Coins className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Convert Workspace to:</span>
+          <div className="flex bg-slate-200/50 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-150 dark:border-slate-750 gap-0.5">
+            {Object.keys(currencyRates).map((currCode) => (
+              <button
+                key={currCode}
+                onClick={() => handleCurrencyChange(currCode)}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg uppercase transition cursor-pointer ${
+                  selectedCurrency === currCode
+                    ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs border border-indigo-100/50 dark:border-indigo-900/30'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                }`}
+              >
+                {currCode}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">Total Balance</p>
-            <h3 className={`text-2xl font-extrabold ${personalBalance >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-              {personalBalance >= 0 ? '+' : ''}${personalBalance.toFixed(2)}
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight">Total Balance</p>
+            <h3 className={`text-2xl font-extrabold ${personalBalance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
+              {personalBalance >= 0 ? '+' : ''}{currencySymbols[selectedCurrency] || selectedCurrency}{personalBalance.toFixed(2)}
             </h3>
           </div>
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${personalBalance >= 0 ? 'bg-emerald-50 text-emerald-500' : 'bg-rose-50 text-rose-500'}`}>
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${personalBalance >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500 dark:text-emerald-450' : 'bg-rose-50 dark:bg-rose-950/20 text-rose-500 dark:text-rose-450'}`}>
             <ArrowUpRight className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">You are owed</p>
-            <h3 className="text-2xl font-extrabold text-slate-800">${youAreOwed.toFixed(2)}</h3>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight">You are owed</p>
+            <h3 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">{currencySymbols[selectedCurrency] || selectedCurrency}{youAreOwed.toFixed(2)}</h3>
           </div>
-          <div className="w-12 h-12 bg-blue-50 rounded-full flex items-center justify-center text-blue-500 shrink-0">
+          <div className="w-12 h-12 bg-blue-50 dark:bg-blue-950/20 rounded-full flex items-center justify-center text-blue-500 dark:text-blue-400 shrink-0">
             <TrendingUp className="w-6 h-6" />
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
-            <p className="text-[10px] text-slate-500 uppercase font-bold tracking-tight">You owe</p>
-            <h3 className="text-2xl font-extrabold text-rose-500">${youOwe.toFixed(2)}</h3>
+            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight">You owe</p>
+            <h3 className="text-2xl font-extrabold text-rose-500 dark:text-rose-400">{currencySymbols[selectedCurrency] || selectedCurrency}{youOwe.toFixed(2)}</h3>
           </div>
-          <div className="w-12 h-12 bg-rose-50 rounded-full flex items-center justify-center text-rose-500 shrink-0">
+          <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/20 rounded-full flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
             <ArrowDownRight className="w-6 h-6" />
           </div>
         </div>
       </div>
 
-      {/* Optimized Debt Settlements */}
+      {/* Settlements & Individual Balances Row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 tracking-tight flex items-center gap-2">
-              🤝 Settlement Optimizer
+            <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+              🤝 Optimized Settlement Matrix
             </h3>
-            <span className="text-[10px] uppercase font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full font-mono">
+            <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-full font-mono">
               Greedy Routing
             </span>
           </div>
-          <p className="text-xs text-gray-500 mb-6">
-            Minimized debt clearance matrix. Shows the exact, most efficient transfers needed to fully settle everyone.
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">
+            Minimized debt clearance matrix calculated in **{selectedCurrency}** to solve all group splits.
           </p>
 
           {balanceResolution.settlements.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-10 bg-gray-50 rounded-2xl border border-dashed border-gray-200">
-              <CheckCircle2 className="w-8 h-8 text-emerald-500 mb-2" />
-              <p className="text-xs font-medium text-gray-600">Perfect Equilibrium!</p>
-              <p className="text-[10px] text-gray-400 mt-1">All dues are completely squared up.</p>
+            <div className="flex flex-col items-center justify-center py-10 bg-gray-50 dark:bg-slate-850/50 rounded-2xl border border-dashed border-gray-200 dark:border-slate-800">
+              <CheckCircle2 className="w-8 h-8 text-emerald-500 dark:text-emerald-400 mb-2" />
+              <p className="text-xs font-medium text-gray-600 dark:text-slate-300">Perfect Equilibrium!</p>
+              <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1">All roommates are completely settled.</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -285,20 +430,20 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
                   key={i} 
                   className={`flex items-center justify-between p-3.5 border rounded-xl text-xs transition ${
                     settle.fromId === currentUserId 
-                      ? 'border-red-100 bg-red-50/20' 
+                      ? 'border-red-100 dark:border-red-950/25 bg-red-50/20 dark:bg-red-950/10' 
                       : settle.toId === currentUserId 
-                      ? 'border-emerald-100 bg-emerald-50/20' 
-                      : 'border-gray-100 bg-gray-50/30'
+                      ? 'border-emerald-100 dark:border-emerald-950/25 bg-emerald-50/20 dark:bg-emerald-950/10' 
+                      : 'border-gray-100 dark:border-slate-800 bg-gray-50/30 dark:bg-slate-850/20'
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
-                    <span className="font-semibold text-gray-800">{settle.fromName}</span>
-                    <span className="text-gray-400">pays</span>
-                    <span className="font-semibold text-gray-800">{settle.toName}</span>
+                    <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.fromName}</span>
+                    <span className="text-gray-400 dark:text-slate-500">pays</span>
+                    <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.toName}</span>
                   </div>
                   <div className="flex items-center gap-1.5 font-mono">
-                    <span className="font-semibold text-gray-900">${settle.amountUSD.toFixed(2)}</span>
-                    <span className="text-[10px] text-gray-400">USD</span>
+                    <span className="font-semibold text-gray-900 dark:text-white">{currencySymbols[selectedCurrency] || selectedCurrency}{settle.amountSelected.toFixed(2)}</span>
+                    <span className="text-[10px] text-gray-400 dark:text-slate-500 uppercase">{selectedCurrency}</span>
                   </div>
                 </div>
               ))}
@@ -307,28 +452,30 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
         </div>
 
         {/* Ledger Breakdown by User */}
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-900 tracking-tight mb-2">👥 Splitwise Board Member Status</h3>
-          <p className="text-xs text-gray-500 mb-6">
-            Individual member balances. Positive implies they are owed; negative implies they owe the pool.
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+          <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight mb-2">👥 Splitwise Board Member Status</h3>
+          <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">
+            Individual roommate balances calculated in **{selectedCurrency}**. Positive represents money owed to them.
           </p>
 
           <div className="space-y-4">
-            {users.map((user) => {
+            {activeGroup?.members.map((memberId) => {
+              const user = userMap.get(memberId);
+              if (!user) return null;
               const bal = balanceResolution.balances[user.id] || 0;
               return (
                 <div key={user.id} className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center font-bold text-gray-600 text-xs uppercase">
+                    <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-slate-800 flex items-center justify-center font-bold text-gray-650 dark:text-slate-300 text-xs uppercase">
                       {user.name.substr(0, 2)}
                     </div>
                     <div>
-                      <h4 className="text-xs font-semibold text-gray-800">{user.name} {user.id === currentUserId && '(You)'}</h4>
-                      <p className="text-[10px] text-gray-400 uppercase font-mono tracking-wider">{user.role}</p>
+                      <h4 className="text-xs font-semibold text-gray-850 dark:text-slate-200">{user.name} {user.id === currentUserId && '(You)'}</h4>
+                      <p className="text-[10px] text-gray-400 dark:text-slate-500 uppercase font-mono tracking-wider">{user.role}</p>
                     </div>
                   </div>
-                  <span className={`text-xs font-mono font-semibold ${bal > 0 ? 'text-emerald-600' : bal < 0 ? 'text-red-500' : 'text-gray-400'}`}>
-                    {bal > 0 ? '+' : ''}${bal.toFixed(2)} USD
+                  <span className={`text-xs font-mono font-semibold ${bal > 0 ? 'text-emerald-600 dark:text-emerald-400' : bal < 0 ? 'text-rose-500 dark:text-rose-400' : 'text-gray-400 dark:text-slate-500'}`}>
+                    {bal > 0 ? '+' : ''}{currencySymbols[selectedCurrency] || selectedCurrency}{bal.toFixed(2)} {selectedCurrency}
                   </span>
                 </div>
               );
@@ -337,15 +484,15 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
         </div>
       </div>
 
-      {/* Recharts Analytics Charts */}
-      {expenses.length > 0 && (
+      {/* Analytics charts */}
+      {dashboardExpenses.length > 0 && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-            <h3 className="text-lg font-semibold text-gray-900 tracking-tight mb-1">🍕 Allocation by Category</h3>
-            <p className="text-xs text-gray-500 mb-6">Consolidated expenditures converted to USD.</p>
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight mb-1">🍕 Allocation by Category ({selectedCurrency})</h3>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">Consolidated expenditures dynamically converted on-the-fly.</p>
             <div className="h-64">
               {categoryData.length === 0 ? (
-                <p className="text-xs text-gray-400 flex items-center justify-center h-full">No category data recorded.</p>
+                <p className="text-xs text-gray-400 dark:text-slate-500 flex items-center justify-center h-full">No category data recorded.</p>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -362,7 +509,10 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
                         <Cell key={`cell-${idx}`} fill={entry.color} />
                       ))}
                     </Pie>
-                    <Tooltip formatter={(value) => [`$${value} USD`, 'Amount']} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: 'var(--tooltip-bg, #fff)', borderColor: 'var(--tooltip-border, #e5e7eb)', borderRadius: '12px', fontSize: '11px', color: 'var(--tooltip-text, #1e293b)' }}
+                      formatter={(value) => [`${currencySymbols[selectedCurrency] || selectedCurrency}${value}`, 'Amount']} 
+                    />
                     <Legend verticalAlign="bottom" height={36} iconType="circle" />
                   </PieChart>
                 </ResponsiveContainer>
@@ -370,22 +520,188 @@ export default function Dashboard({ groups, expenses, users, currentUserId, curr
             </div>
           </div>
 
-          <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-            <h3 className="text-lg font-semibold text-gray-900 tracking-tight mb-1">📈 Monthly Spending Velocity</h3>
-            <p className="text-xs text-gray-500 mb-6">A real-time visual tracking of shared volume.</p>
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+            <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight mb-1">📈 Monthly Spending Velocity ({selectedCurrency})</h3>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">A real-time visual tracking of shared pool volume.</p>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--stroke-grid, #f3f4f6)" />
                   <XAxis dataKey="month" stroke="#9ca3af" fontSize={11} tickLine={false} />
                   <YAxis stroke="#9ca3af" fontSize={11} tickLine={false} />
-                  <Tooltip formatter={(value) => [`$${value} USD`, 'Total spent']} />
+                  <Tooltip 
+                    contentStyle={{ backgroundColor: 'var(--tooltip-bg, #fff)', borderColor: 'var(--tooltip-border, #e5e7eb)', borderRadius: '12px', fontSize: '11px', color: 'var(--tooltip-text, #1e293b)' }}
+                    formatter={(value) => [`${currencySymbols[selectedCurrency] || selectedCurrency}${value}`, 'Total spent']} 
+                  />
                   <Bar dataKey="Amount" fill="#6366f1" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
         </div>
+      )}
+
+      {/* DASHBOARD LOGGED EXPENSES TABLE VIEW (Requirement #3) */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden mt-8">
+        <div className="px-6 py-4 border-b border-slate-150 dark:border-slate-800 flex items-center justify-between bg-slate-50 dark:bg-slate-850/50">
+          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
+            📜 Roommates Transaction Log Database ({activeGroup?.name || 'Group'})
+          </h3>
+          <span className="text-[10px] font-semibold text-indigo-650 dark:text-indigo-400 uppercase tracking-wider bg-indigo-100 dark:bg-indigo-950/40 px-2.5 py-1 rounded-full">
+            {dashboardExpenses.length} Shared Transactions
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          {loadingExpenses ? (
+            <div className="p-12 text-center text-xs text-slate-400 font-medium flex flex-col items-center justify-center gap-2 bg-slate-50 dark:bg-slate-900">
+              <span className="animate-spin rounded-full h-5 w-5 border-b-2 border-indigo-600"></span>
+              Synchronizing with Firestore ledger...
+            </div>
+          ) : dashboardExpenses.length === 0 ? (
+            <div className="p-12 text-center text-xs text-slate-400 font-medium flex flex-col items-center justify-center gap-1 bg-slate-50 dark:bg-slate-900">
+              <Info className="w-5 h-5 text-slate-300 dark:text-slate-600" />
+              No expenses logged for this group yet. Go to the Groups tab to add some!
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-100/50 dark:bg-slate-850/30 border-b border-slate-150 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                  <th className="px-6 py-3">Date</th>
+                  <th className="px-6 py-3">Description</th>
+                  <th className="px-6 py-3">Category</th>
+                  <th className="px-6 py-3">Paid By</th>
+                  <th className="px-6 py-3 text-right">Original Cost</th>
+                  <th className="px-6 py-3 text-right">Total ({selectedCurrency})</th>
+                  <th className="px-6 py-3 text-right">My Share ({selectedCurrency})</th>
+                  <th className="px-6 py-3 text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900">
+                {dashboardExpenses.map((exp) => {
+                  const payer = userMap.get(exp.paidBy);
+                  const originalCost = `${exp.currency} ${Number(exp.amount).toFixed(2)}`;
+                  const totalConverted = convertToSelected(exp.amount, exp.currency);
+
+                  // Find current user's split share
+                  const mySplit = exp.splits?.find(s => s.userId === currentUserId);
+                  const myShareAmount = mySplit ? convertToSelected(mySplit.amount, exp.currency) : 0;
+
+                  // Split details list
+                  const splitDetails = exp.splits?.map(s => {
+                    const u = userMap.get(s.userId);
+                    const amtConverted = convertToSelected(s.amount, exp.currency);
+                    return `${u?.name || 'User'}: ${currencySymbols[selectedCurrency] || selectedCurrency}${amtConverted.toFixed(2)}`;
+                  }).join(', ');
+
+                  // Allowed to edit / delete if they paid or they are an admin
+                  const isAdmin = users.find(u => u.id === currentUserId)?.role === 'admin';
+                  const canManage = exp.paidBy === currentUserId || isAdmin;
+
+                  return (
+                    <tr key={exp.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition group border-b border-slate-100 dark:border-slate-850/60">
+                      <td className="px-6 py-4 font-mono text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
+                        <div className="flex items-center gap-1">
+                          <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
+                          {exp.date}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="text-slate-800 dark:text-slate-200 font-semibold">{exp.description}</div>
+                        <div className="text-[9px] text-slate-400 dark:text-slate-500 mt-0.5 max-w-sm truncate" title={splitDetails}>
+                          Splits: {splitDetails || 'None'}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-150 dark:bg-slate-800 text-gray-650 dark:text-slate-300">
+                          {exp.category || 'Other'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-850 flex items-center justify-center font-bold text-[9px] text-slate-650 dark:text-slate-350 uppercase">
+                            {payer?.name?.substring(0, 2) || '??'}
+                          </div>
+                          <span className="text-slate-750 dark:text-slate-300">{payer?.name || 'Unknown'}</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-right font-mono font-semibold text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                        {originalCost}
+                      </td>
+                      <td className="px-6 py-4 text-right font-mono font-bold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                        {currencySymbols[selectedCurrency] || selectedCurrency}{totalConverted.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 text-right font-mono font-bold text-indigo-600 dark:text-indigo-400 whitespace-nowrap">
+                        {myShareAmount > 0 
+                          ? `${currencySymbols[selectedCurrency] || selectedCurrency}${myShareAmount.toFixed(2)}`
+                          : '-'
+                        }
+                      </td>
+                      <td className="px-6 py-4 text-center whitespace-nowrap">
+                        <div className="flex items-center justify-center gap-1">
+                          {canManage && onUpdateExpense && (
+                            <button
+                              onClick={() => setEditingExpense(exp)}
+                              title="Modify transaction details"
+                              className="p-1 text-slate-400 hover:text-indigo-600 dark:text-slate-500 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
+                          {canManage && onDeleteExpense && (
+                            <button
+                              onClick={() => {
+                                setConfirmDialog({
+                                  isOpen: true,
+                                  title: 'Delete Expense',
+                                  message: `Are you sure you want to delete the expense "${exp.description}"? This action cannot be undone.`,
+                                  type: 'danger',
+                                  onConfirm: async () => {
+                                    setConfirmDialog(null);
+                                    await onDeleteExpense(exp.id, exp.amount);
+                                    const updated = dashboardExpenses.filter(e => e.id !== exp.id);
+                                    setDashboardExpenses(updated);
+                                  }
+                                });
+                              }}
+                              title="Delete transaction"
+                              className="p-1 text-slate-400 hover:text-red-500 dark:text-slate-500 dark:hover:text-red-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition cursor-pointer"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+
+      {/* RENDER EDIT TRANSACTION MODAL */}
+      {editingExpense && activeGroup && (
+        <EditExpenseModal
+          expense={editingExpense}
+          users={users}
+          groupMembers={activeGroup.members}
+          currency={activeGroup.currency}
+          onClose={() => setEditingExpense(null)}
+          onSave={handleSaveEditedExpense}
+        />
+      )}
+
+      {confirmDialog && confirmDialog.isOpen && (
+        <ConfirmDialog
+          isOpen={confirmDialog.isOpen}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          type={confirmDialog.type}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
       )}
     </div>
   );

@@ -5,6 +5,7 @@
 
 import React, { useState, useMemo } from 'react';
 import { Group, Expense, User, SplitMethod, ExpenseSplit, ExpenseItem, UserRole } from '../types.js';
+import ConfirmDialog from './ConfirmDialog.js';
 import { 
   Trash2, 
   Plus, 
@@ -18,8 +19,10 @@ import {
   Check, 
   FileSpreadsheet, 
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Pencil
 } from 'lucide-react';
+import EditExpenseModal from './EditExpenseModal.js';
 
 interface GroupDetailProps {
   group: Group;
@@ -29,6 +32,8 @@ interface GroupDetailProps {
   currentUserRole: UserRole;
   onAddExpense: (expense: Omit<Expense, 'id' | 'createdAt'>) => Promise<void>;
   onDeleteExpense: (expenseId: string, amount: number) => Promise<void>;
+  onUpdateExpense?: (expenseId: string, updatedExpense: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => Promise<void>;
+  onUpdateGroup?: (groupId: string, name: string, description: string, currency: string) => Promise<void>;
 }
 
 export default function GroupDetail({ 
@@ -38,12 +43,68 @@ export default function GroupDetail({
   currentUserId, 
   currentUserRole,
   onAddExpense, 
-  onDeleteExpense 
+  onDeleteExpense,
+  onUpdateExpense,
+  onUpdateGroup
 }: GroupDetailProps) {
   // Member records mapped
   const groupUsers = useMemo(() => {
     return users.filter(u => group.members.includes(u.id));
   }, [users, group.members]);
+
+  // Check if current user is admin of the group or global admin
+  const isGroupAdmin = useMemo(() => {
+    return group.memberRoles?.[currentUserId] === 'admin' || currentUserRole === 'admin';
+  }, [group.memberRoles, currentUserId, currentUserRole]);
+
+  // Group editing state
+  const [isEditingGroup, setIsEditingGroup] = useState(false);
+  const [editGroupName, setEditGroupName] = useState(group.name);
+  const [editGroupDesc, setEditGroupDesc] = useState(group.description || '');
+  const [editGroupCurrency, setEditGroupCurrency] = useState(group.currency);
+  const [groupError, setGroupError] = useState<string | null>(null);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type?: 'danger' | 'warning' | 'info';
+    onConfirm: () => void;
+  } | null>(null);
+
+  // Sync group edit form when group changes
+  React.useEffect(() => {
+    setEditGroupName(group.name);
+    setEditGroupDesc(group.description || '');
+    setEditGroupCurrency(group.currency);
+    setGroupError(null);
+  }, [group]);
+
+  const handleGroupUpdateSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editGroupName.trim()) return;
+
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Update Group Details',
+      message: 'Are you sure you want to update group details? This will modify the room name, description, and currency.',
+      type: 'warning',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setGroupError(null);
+        try {
+          if (onUpdateGroup) {
+            await onUpdateGroup(group.id, editGroupName, editGroupDesc, editGroupCurrency);
+            setIsEditingGroup(false);
+          }
+        } catch (err: any) {
+          setGroupError(err.message || 'Failed to update group');
+        }
+      }
+    });
+  };
+
+  // Editing state
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
   // Form States - Expense
   const [desc, setDesc] = useState('');
@@ -168,17 +229,26 @@ export default function GroupDetail({
       category
     };
 
-    try {
-      await onAddExpense(payload);
-      // Reset Form states
-      setDesc('');
-      setAmount('');
-      setItems([]);
-      setExactAmounts({});
-      setShares({});
-    } catch (err) {
-      console.error(err);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Log Split Expense',
+      message: `Are you sure you want to log this expense of ${group.currency} ${finalAmount.toFixed(2)} for "${desc}"?`,
+      type: 'info',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await onAddExpense(payload);
+          // Reset Form states
+          setDesc('');
+          setAmount('');
+          setItems([]);
+          setExactAmounts({});
+          setShares({});
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    });
   };
 
   // Generate Email invitation simulate link
@@ -258,7 +328,18 @@ export default function GroupDetail({
               <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-md uppercase font-mono tracking-wider">
                 Room Workspace
               </span>
-              <h2 className="text-xl font-semibold text-gray-900 mt-2">{group.name}</h2>
+              <div className="flex items-center gap-2 mt-2">
+                <h2 className="text-xl font-semibold text-gray-900">{group.name}</h2>
+                {isGroupAdmin && (
+                  <button
+                    onClick={() => setIsEditingGroup(true)}
+                    className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 rounded transition"
+                    title="Edit group details"
+                  >
+                    <Pencil className="w-4.5 h-4.5" />
+                  </button>
+                )}
+              </div>
               <p className="text-xs text-gray-400 mt-1">{group.description || 'Shared expense split ledger room'}</p>
             </div>
             <div className="text-right">
@@ -505,10 +586,31 @@ export default function GroupDetail({
                         </p>
                       </div>
 
+                      {showDelete && onUpdateExpense && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingExpense(exp)}
+                          title="Modify transaction details"
+                          className="text-gray-400 hover:text-indigo-650 transition opacity-0 group-hover:opacity-100 mr-1"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
                       {showDelete && (
                         <button
                           type="button"
-                          onClick={() => onDeleteExpense(exp.id, exp.amount)}
+                          onClick={() => {
+                            setConfirmDialog({
+                              isOpen: true,
+                              title: 'Delete Expense',
+                              message: `Are you sure you want to delete this expense of ${exp.currency} ${Number(exp.amount).toFixed(2)} for "${exp.description}"?`,
+                              type: 'danger',
+                              onConfirm: () => {
+                                setConfirmDialog(null);
+                                onDeleteExpense(exp.id, exp.amount);
+                              }
+                            });
+                          }}
                           className="text-gray-400 hover:text-red-500 transition opacity-0 group-hover:opacity-100"
                         >
                           <Trash2 className="w-4 h-4" />
@@ -665,6 +767,110 @@ export default function GroupDetail({
 
       </div>
 
+      {editingExpense && (
+        <EditExpenseModal
+          expense={editingExpense}
+          users={users}
+          groupMembers={group.members}
+          currency={group.currency}
+          onClose={() => setEditingExpense(null)}
+          onSave={onUpdateExpense!}
+        />
+      )}
+
+      {isEditingGroup && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white border border-slate-100 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col my-8">
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800">Edit Group Details</h3>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Modify workspace room details</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEditingGroup(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleGroupUpdateSubmit} className="p-6 space-y-4">
+              {groupError && (
+                <div className="bg-rose-50 border border-rose-200 text-rose-700 p-2.5 rounded-xl font-semibold mb-2 text-xs">
+                  ⚠️ {groupError}
+                </div>
+              )}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Group Name</label>
+                <input
+                  type="text"
+                  required
+                  value={editGroupName}
+                  onChange={(e) => setEditGroupName(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Description</label>
+                <textarea
+                  value={editGroupDesc}
+                  onChange={(e) => setEditGroupDesc(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Base Currency</label>
+                <select
+                  value={editGroupCurrency}
+                  onChange={(e) => setEditGroupCurrency(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 font-semibold"
+                >
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="INR">INR (₹)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="CAD">CAD (CA$)</option>
+                  <option value="AUD">AUD (A$)</option>
+                  <option value="JPY">JPY (¥)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsEditingGroup(false)}
+                  className="px-4 py-2 border border-gray-200 text-gray-500 hover:text-gray-700 rounded-xl text-xs font-semibold transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition"
+                >
+                  Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {confirmDialog && confirmDialog.isOpen && (
+        <ConfirmDialog
+          isOpen={confirmDialog.isOpen}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          type={confirmDialog.type}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
     </div>
   );
 }

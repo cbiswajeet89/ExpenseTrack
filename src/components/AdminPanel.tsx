@@ -4,17 +4,18 @@
  */
 
 import { useState, useEffect } from 'react';
-import { User, UserRole, SystemAnalytics } from '../types.js';
-import { ShieldAlert, Users, Server, Activity, ArrowRight, ShieldCheck, RefreshCw } from 'lucide-react';
+import { User, UserRole, SystemAnalytics, Group } from '../types.js';
+import { ShieldAlert, Users, Server, Activity, ArrowRight, ShieldCheck, RefreshCw, FolderClosed } from 'lucide-react';
 
 interface AdminPanelProps {
   currentUser: User;
   jwtToken: string;
   users: User[];
+  groups: Group[];
   onUpdateUserRole: (userId: string, newRole: UserRole) => Promise<void>;
 }
 
-export default function AdminPanel({ currentUser, jwtToken, users, onUpdateUserRole }: AdminPanelProps) {
+export default function AdminPanel({ currentUser, jwtToken, users, groups, onUpdateUserRole }: AdminPanelProps) {
   const isAdmin = currentUser.role === 'admin';
   const [analytics, setAnalytics] = useState<SystemAnalytics | null>(null);
   const [loading, setLoading] = useState(false);
@@ -218,6 +219,60 @@ export default function AdminPanel({ currentUser, jwtToken, users, onUpdateUserR
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Group Database Table */}
+      <div className="bg-white border border-slate-100 rounded-2xl shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-50 flex items-center justify-between">
+          <h3 className="text-sm font-bold text-slate-800 tracking-tight flex items-center gap-1.5">
+            <FolderClosed className="w-4 h-4 text-slate-500" /> 📁 Active Split Rooms & Groups Database
+          </h3>
+          <span className="text-[10px] font-semibold text-indigo-650 uppercase tracking-wider bg-indigo-50 px-2 py-0.5 rounded">
+            Total Rooms: {groups.length}
+          </span>
+        </div>
+
+        <div className="overflow-x-auto">
+          {groups.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-400 font-medium">
+              No registered groups in the database.
+            </div>
+          ) : (
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 font-bold">
+                  <th className="px-6 py-3">Group details</th>
+                  <th className="px-6 py-3">Unique ID</th>
+                  <th className="px-6 py-3">Base Currency</th>
+                  <th className="px-6 py-3 text-center">Roommates</th>
+                  <th className="px-6 py-3 text-right">Accrued Pool</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {groups.map((g) => (
+                  <tr key={g.id} className="hover:bg-slate-50/50 transition">
+                    <td className="px-6 py-4">
+                      <div className="font-semibold text-slate-800">{g.name}</div>
+                      <div className="text-[10px] text-slate-400 mt-0.5 line-clamp-1">{g.description || 'No description provided'}</div>
+                    </td>
+                    <td className="px-6 py-4 font-mono text-[10px] text-slate-400">
+                      {g.id}
+                    </td>
+                    <td className="px-6 py-4 font-mono font-semibold uppercase">
+                      {g.currency}
+                    </td>
+                    <td className="px-6 py-4 text-center font-semibold font-mono text-slate-700">
+                      {g.members?.length || 0}
+                    </td>
+                    <td className="px-6 py-4 text-right font-bold font-mono text-indigo-600">
+                      {g.currency} {(g.totalExpense || 0).toFixed(2)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
     </div>

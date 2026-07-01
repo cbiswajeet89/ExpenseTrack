@@ -293,3 +293,60 @@ export async function deleteExpenseFromDb(expenseId: string, groupId: string, am
     await updateDoc(groupRef, { totalExpense: newTotal });
   }
 }
+
+export async function getAllGroups(): Promise<Group[]> {
+  try {
+    const snap = await getDocs(collection(db, 'groups'));
+    const list: Group[] = [];
+    snap.forEach(d => {
+      list.push(d.data() as Group);
+    });
+    return list;
+  } catch (err) {
+    console.error('[Firestore] getAllGroups error:', err);
+    return [];
+  }
+}
+
+export async function updateExpenseInDb(
+  expenseId: string,
+  updatedExpense: Omit<Expense, 'id' | 'createdAt'>,
+  oldAmount: number
+): Promise<Expense> {
+  const expenseRef = doc(db, 'expenses', expenseId);
+  const updatedWithTimestamp: Expense = {
+    ...updatedExpense,
+    id: expenseId,
+    createdAt: new Date().toISOString() // we can preserve or update timestamp, updating is fine
+  };
+  await setDoc(expenseRef, updatedWithTimestamp);
+
+  // Update group totalExpense by subtracting old amount and adding new amount
+  const groupRef = doc(db, 'groups', updatedExpense.groupId);
+  const snap = await getDocs(query(collection(db, 'groups')));
+  let targetGroup: Group | null = null;
+  snap.forEach(d => {
+    if (d.id === updatedExpense.groupId) {
+      targetGroup = d.data() as Group;
+    }
+  });
+
+  if (targetGroup) {
+    const group = targetGroup as Group;
+    const newTotal = Math.max(0, (group.totalExpense || 0) - oldAmount + Number(updatedExpense.amount));
+    await updateDoc(groupRef, { totalExpense: newTotal });
+  }
+
+  return updatedWithTimestamp;
+}
+
+export async function updateGroupInDb(
+  groupId: string,
+  name: string,
+  description: string,
+  currency: string
+): Promise<void> {
+  const groupRef = doc(db, 'groups', groupId);
+  await updateDoc(groupRef, { name, description, currency });
+}
+

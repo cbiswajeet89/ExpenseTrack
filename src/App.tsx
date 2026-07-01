@@ -14,7 +14,10 @@ import {
   createExpenseInDb, 
   deleteExpenseFromDb, 
   updateUserRoleInDb,
-  addMemberToGroup
+  addMemberToGroup,
+  getAllGroups,
+  updateExpenseInDb,
+  updateGroupInDb
 } from './lib/dbHelper.js';
 
 // Sub-components
@@ -25,6 +28,7 @@ import GroupDetail from './components/GroupDetail.js';
 import AdminPanel from './components/AdminPanel.js';
 import ReferenceViewer from './components/ReferenceViewer.js';
 import ProfileSettings from './components/ProfileSettings.js';
+import ConfirmDialog from './components/ConfirmDialog.js';
 
 // Icons
 import { 
@@ -37,7 +41,9 @@ import {
   UserPlus, 
   ArrowRight,
   ShieldAlert,
-  UserCheck
+  UserCheck,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 export default function App() {
@@ -46,6 +52,15 @@ export default function App() {
   const [groups, setGroups] = useState<Group[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type?: 'danger' | 'warning' | 'info';
+    confirmLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+  } | null>(null);
   const [currencyRates, setCurrencyRates] = useState<{ [key: string]: number }>({
     USD: 1.0,
     EUR: 0.91,
@@ -68,6 +83,22 @@ export default function App() {
   const [invitePassword, setInvitePassword] = useState('');
   const [inviteConfirmPassword, setInviteConfirmPassword] = useState('');
   const [inviteAccepting, setInviteAccepting] = useState(false);
+  const [inviteUserExists, setInviteUserExists] = useState(false);
+  const [inviteExistingUser, setInviteExistingUser] = useState<any | null>(null);
+
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    return (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
+  });
+
+  // Keep dark class on document element in sync
+  useEffect(() => {
+    if (theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   // Parse invite tokens and load initial system configurations
   useEffect(() => {
@@ -93,6 +124,8 @@ export default function App() {
           if (resolveRes.ok && resolveData.success) {
             setPendingInvite(resolveData.invite);
             setInviteEmail(resolveData.invite.email);
+            setInviteUserExists(resolveData.userExists || false);
+            setInviteExistingUser(resolveData.existingUser || null);
           }
         }
       } catch (err) {
@@ -111,9 +144,13 @@ export default function App() {
       if (!currentUser) return;
       setLoading(true);
       try {
+        const fetchGroupsPromise = currentUser.role === 'admin' 
+          ? getAllGroups() 
+          : getGroupsForUser(currentUser.id);
+
         const [allUsers, myGroups] = await Promise.all([
           getAllUsers(),
-          getGroupsForUser(currentUser.id)
+          fetchGroupsPromise
         ]);
         
         setUsers(allUsers);
@@ -161,9 +198,19 @@ export default function App() {
   };
 
   const handleLogout = () => {
-    setCurrentUser(null);
-    setJwtToken('');
-    setSelectedGroupId(null);
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Logout Confirmation',
+      message: 'Are you sure you want to log out of your session?',
+      type: 'warning',
+      confirmLabel: 'Logout',
+      onConfirm: () => {
+        setCurrentUser(null);
+        setJwtToken('');
+        setSelectedGroupId(null);
+        setConfirmDialog(null);
+      }
+    });
   };
 
   // Group creation
@@ -189,7 +236,10 @@ export default function App() {
 
       // Refresh groups list to reflect newly logged totals
       if (currentUser) {
-        const myGroups = await getGroupsForUser(currentUser.id);
+        const fetchGroupsPromise = currentUser.role === 'admin' 
+          ? getAllGroups() 
+          : getGroupsForUser(currentUser.id);
+        const myGroups = await fetchGroupsPromise;
         setGroups(myGroups);
       }
     } catch (err) {
@@ -206,7 +256,10 @@ export default function App() {
 
       // Refresh groups
       if (currentUser) {
-        const myGroups = await getGroupsForUser(currentUser.id);
+        const fetchGroupsPromise = currentUser.role === 'admin' 
+          ? getAllGroups() 
+          : getGroupsForUser(currentUser.id);
+        const myGroups = await fetchGroupsPromise;
         setGroups(myGroups);
       }
     } catch (err) {
@@ -214,14 +267,53 @@ export default function App() {
     }
   };
 
-  // Update user role (from Admin panel)
-  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
+  // Update split expense
+  const handleUpdateExpense = async (expenseId: string, updatedPayload: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => {
     try {
-      await updateUserRoleInDb(userId, newRole);
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+      const updatedExpense = await updateExpenseInDb(expenseId, updatedPayload, oldAmount);
+      setExpenses(prev => prev.map(e => e.id === expenseId ? updatedExpense : e));
+
+      // Refresh groups list to reflect newly logged totals
+      if (currentUser) {
+        const fetchGroupsPromise = currentUser.role === 'admin' 
+          ? getAllGroups() 
+          : getGroupsForUser(currentUser.id);
+        const myGroups = await fetchGroupsPromise;
+        setGroups(myGroups);
+      }
     } catch (err) {
       console.error(err);
     }
+  };
+
+  // Update group details
+  const handleUpdateGroup = async (groupId: string, name: string, description: string, currency: string) => {
+    try {
+      await updateGroupInDb(groupId, name, description, currency);
+      setGroups(prev => prev.map(g => g.id === groupId ? { ...g, name, description, currency } : g));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Update user role (from Admin panel)
+  const handleUpdateUserRole = async (userId: string, newRole: UserRole) => {
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Update User Role',
+      message: `Are you sure you want to change this user's role to ${newRole}?`,
+      type: 'warning',
+      confirmLabel: 'Update Role',
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await updateUserRoleInDb(userId, newRole);
+          setUsers(prev => prev.map(u => u.id === userId ? { ...u, role: newRole } : u));
+        } catch (err) {
+          console.error(err);
+        }
+      }
+    });
   };
 
   // Synchronize profile updates on current user & list
@@ -234,25 +326,54 @@ export default function App() {
   // Accept simulation join link invitation
   const handleAcceptInvite = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inviteName.trim() || !inviteEmail.trim() || !invitePassword || !pendingInvite) return;
+    if (!pendingInvite || !inviteEmail.trim()) return;
 
-    if (invitePassword !== inviteConfirmPassword) {
-      alert('Passwords do not match.');
-      return;
+    const isAlreadyLoggedInAsEmail = currentUser && currentUser.email.toLowerCase().trim() === inviteEmail.toLowerCase().trim();
+
+    if (!inviteUserExists) {
+      if (!inviteName.trim() || !invitePassword) {
+        alert('Please fill in your name and password.');
+        return;
+      }
+      if (invitePassword !== inviteConfirmPassword) {
+        alert('Passwords do not match.');
+        return;
+      }
+    } else {
+      if (!isAlreadyLoggedInAsEmail && !invitePassword) {
+        alert('Please provide your password to join.');
+        return;
+      }
     }
 
     setInviteAccepting(true);
     try {
+      const headers: HeadersInit = { 'Content-Type': 'application/json' };
+      if (jwtToken) {
+        headers['Authorization'] = `Bearer ${jwtToken}`;
+      }
+
+      const bodyPayload: any = {
+        token: inviteToken,
+        userEmail: inviteEmail
+      };
+
+      if (inviteUserExists) {
+        if (isAlreadyLoggedInAsEmail) {
+          bodyPayload.bypassPassword = true;
+        } else {
+          bodyPayload.password = invitePassword;
+        }
+      } else {
+        bodyPayload.userName = inviteName;
+        bodyPayload.password = invitePassword;
+      }
+
       // 1. Submit to REST endpoint
       const res = await fetch('/api/invite/accept', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          token: inviteToken,
-          userName: inviteName,
-          userEmail: inviteEmail,
-          password: invitePassword
-        })
+        headers,
+        body: JSON.stringify(bodyPayload)
       });
       const data = await res.json();
       if (!res.ok) {
@@ -261,13 +382,13 @@ export default function App() {
 
       // 2. Add user registration record to Firestore DB
       const userRecord = await getAllUsers();
-      let matchedUser = userRecord.find(u => u.email === inviteEmail);
+      let matchedUser = userRecord.find(u => u.email.toLowerCase().trim() === inviteEmail.toLowerCase().trim());
 
       if (!matchedUser) {
         // Register newly created roommate in Firestore DB
         matchedUser = {
           id: data.user.id,
-          name: inviteName,
+          name: data.user.name || inviteName,
           email: inviteEmail,
           role: pendingInvite.role,
           createdAt: new Date().toISOString()
@@ -284,6 +405,8 @@ export default function App() {
       setSelectedGroupId(pendingInvite.groupId);
       setPendingInvite(null);
       setInviteToken(null);
+      setInviteUserExists(false);
+      setInviteExistingUser(null);
       
       // Clean query parameter in browser URL address bar safely
       window.history.replaceState({}, document.title, "/");
@@ -307,6 +430,8 @@ export default function App() {
 
   // If there is an active pending invitation token we render the Accept Invitation overlay screen
   if (pendingInvite) {
+    const isAlreadyLoggedInAsEmail = currentUser && currentUser.email.toLowerCase().trim() === inviteEmail.toLowerCase().trim();
+
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#f9fafb] p-6 font-sans">
         <div className="w-full max-w-md bg-white border border-gray-100 rounded-2xl shadow-xl shadow-gray-100/50 p-8">
@@ -333,62 +458,139 @@ export default function App() {
             </div>
           </div>
 
-          <form onSubmit={handleAcceptInvite} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Your Full Name</label>
-              <input
-                type="text"
-                required
-                value={inviteName}
-                onChange={(e) => setInviteName(e.target.value)}
-                placeholder="Enter name"
-                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-              />
-            </div>
+          {inviteUserExists ? (
+            isAlreadyLoggedInAsEmail ? (
+              <div className="space-y-4">
+                <div className="p-4 bg-emerald-50 border border-emerald-100 text-emerald-850 rounded-xl text-xs space-y-2 leading-relaxed">
+                  <p className="font-semibold text-emerald-800">✨ Account Verified</p>
+                  <p>You are currently authenticated as <strong>{currentUser.email}</strong>. Just click below to accept this invitation and join the group.</p>
+                </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Your Invite Email Address</label>
-              <input
-                type="email"
-                required
-                readOnly
-                value={inviteEmail}
-                className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-xl text-xs font-mono text-gray-500 cursor-not-allowed focus:outline-none"
-              />
-            </div>
+                <button
+                  onClick={(e) => handleAcceptInvite(e)}
+                  disabled={inviteAccepting}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-medium py-2.5 rounded-xl text-xs transition shadow-lg shadow-emerald-600/10 disabled:opacity-50"
+                >
+                  {inviteAccepting ? 'Joining Group...' : 'Accept & Join Group'}
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleAcceptInvite} className="space-y-4">
+                <div className="p-4 bg-indigo-50 border border-indigo-100 text-indigo-800 rounded-xl text-xs space-y-1.5 leading-relaxed">
+                  <p className="font-semibold">💡 Account Already Exists</p>
+                  <p>An account with email <strong>{inviteEmail}</strong> is already registered. Please verify your password below to join.</p>
+                </div>
 
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Set Your Account Password</label>
-              <input
-                type="password"
-                required
-                value={invitePassword}
-                onChange={(e) => setInvitePassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-              />
-            </div>
+                {currentUser && (
+                  <div className="p-3 bg-amber-50 border border-amber-100 text-amber-800 rounded-xl text-[11px] leading-normal">
+                    ⚠️ Note: You are currently logged in as <strong>{currentUser.email}</strong>. Verifying your password will switch your active session to <strong>{inviteEmail}</strong>.
+                  </div>
+                )}
 
-            <div>
-              <label className="block text-xs font-semibold text-gray-600 mb-1">Confirm Your Password</label>
-              <input
-                type="password"
-                required
-                value={inviteConfirmPassword}
-                onChange={(e) => setInviteConfirmPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-              />
-            </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Your Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    readOnly
+                    value={inviteEmail}
+                    className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-xl text-xs font-mono text-gray-500 cursor-not-allowed focus:outline-none"
+                  />
+                </div>
 
-            <button
-              type="submit"
-              disabled={inviteAccepting}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-xl text-xs transition shadow-lg shadow-indigo-600/10 disabled:opacity-50"
-            >
-              {inviteAccepting ? 'Settle & Register...' : 'Accept Invitation & Join'}
-            </button>
-          </form>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Enter Your Password</label>
+                  <input
+                    type="password"
+                    required
+                    value={invitePassword}
+                    onChange={(e) => setInvitePassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={inviteAccepting}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-xl text-xs transition shadow-lg shadow-indigo-600/10 disabled:opacity-50"
+                >
+                  {inviteAccepting ? 'Verifying & Joining...' : 'Verify Password & Join'}
+                </button>
+
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPendingInvite(null);
+                      setInviteToken(null);
+                      window.history.replaceState({}, document.title, "/");
+                    }}
+                    className="text-[11px] text-gray-400 hover:text-gray-600 underline font-medium"
+                  >
+                    Cancel and return to app
+                  </button>
+                </div>
+              </form>
+            )
+          ) : (
+            <form onSubmit={handleAcceptInvite} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Your Full Name</label>
+                <input
+                  type="text"
+                  required
+                  value={inviteName}
+                  onChange={(e) => setInviteName(e.target.value)}
+                  placeholder="Enter name"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Your Invite Email Address</label>
+                <input
+                  type="email"
+                  required
+                  readOnly
+                  value={inviteEmail}
+                  className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-xl text-xs font-mono text-gray-500 cursor-not-allowed focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Set Your Account Password</label>
+                <input
+                  type="password"
+                  required
+                  value={invitePassword}
+                  onChange={(e) => setInvitePassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Confirm Your Password</label>
+                <input
+                  type="password"
+                  required
+                  value={inviteConfirmPassword}
+                  onChange={(e) => setInviteConfirmPassword(e.target.value)}
+                  placeholder="••••••••"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={inviteAccepting}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2 rounded-xl text-xs transition shadow-lg shadow-indigo-600/10 disabled:opacity-50"
+              >
+                {inviteAccepting ? 'Settle & Register...' : 'Accept Invitation & Join'}
+              </button>
+            </form>
+          )}
         </div>
       </div>
     );
@@ -402,20 +604,27 @@ export default function App() {
   const selectedGroup = groups.find(g => g.id === selectedGroupId);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans flex flex-col md:flex-row">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col md:flex-row">
       
       {/* MOBILE TOP BAR */}
-      <header className="md:hidden bg-white border-b border-slate-200 sticky top-0 z-30 px-4 py-3 flex items-center justify-between">
-        <h1 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+      <header className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 px-4 py-3 flex items-center justify-between">
+        <h1 className="text-sm font-bold text-slate-800 dark:text-white flex items-center gap-1.5">
           <div className="w-7 h-7 bg-indigo-500 rounded-lg flex items-center justify-center text-white text-[10px] font-bold">
             W
           </div>
           SPLITWISE.PRO
         </h1>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 px-2 py-0.5 rounded capitalize">
+          <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 px-2 py-0.5 rounded capitalize">
             {currentUser.role}
           </span>
+          <button
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            className="p-1.5 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+            title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+          >
+            {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+          </button>
           <button
             onClick={handleLogout}
             className="p-1.5 text-slate-400 hover:text-red-500 transition-colors"
@@ -543,38 +752,38 @@ export default function App() {
       </aside>
 
       {/* MOBILE BOTTOM NAV BAR */}
-      <nav className="md:hidden flex items-center justify-around bg-white border-t border-slate-200 py-3 text-xs text-center fixed bottom-0 left-0 right-0 z-40 shadow-[0_-2px_10px_rgba(0,0,0,0.03)]">
+      <nav className="md:hidden flex items-center justify-around bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-3 text-xs text-center fixed bottom-0 left-0 right-0 z-40 shadow-[0_-2px_10px_rgba(0,0,0,0.03)] dark:shadow-[0_-2px_10px_rgba(0,0,0,0.2)]">
         <button
           onClick={() => setActiveTab('dashboard')}
-          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'dashboard' ? 'text-indigo-600 font-semibold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'dashboard' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <LayoutDashboard className="w-4.5 h-4.5" />
           <span className="text-[9px]">Dashboard</span>
         </button>
         <button
           onClick={() => setActiveTab('groups')}
-          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'groups' ? 'text-indigo-600 font-semibold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'groups' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <Users className="w-4.5 h-4.5" />
           <span className="text-[9px]">Groups</span>
         </button>
         <button
           onClick={() => setActiveTab('profile')}
-          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'profile' ? 'text-indigo-600 font-semibold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'profile' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <UserCheck className="w-4.5 h-4.5" />
           <span className="text-[9px]">Profile</span>
         </button>
         <button
           onClick={() => setActiveTab('admin')}
-          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'admin' ? 'text-indigo-600 font-semibold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'admin' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <Shield className="w-4.5 h-4.5" />
           <span className="text-[9px]">Admin</span>
         </button>
         <button
           onClick={() => setActiveTab('reference')}
-          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'reference' ? 'text-indigo-600 font-semibold' : 'text-slate-400'}`}
+          className={`flex flex-col items-center gap-0.5 transition-colors ${activeTab === 'reference' ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-slate-400 dark:text-slate-500'}`}
         >
           <Code2 className="w-4.5 h-4.5" />
           <span className="text-[9px]">Export</span>
@@ -585,29 +794,36 @@ export default function App() {
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
         
         {/* DESKTOP HEADER */}
-        <header className="hidden md:flex h-16 border-b border-slate-200 bg-white px-8 items-center justify-between shadow-sm z-10 shrink-0">
+        <header className="hidden md:flex h-16 border-b border-slate-200 dark:border-slate-850 bg-white dark:bg-slate-900 px-8 items-center justify-between shadow-sm z-10 shrink-0">
           <div className="flex items-center gap-4">
-            <h2 className="text-sm font-bold text-slate-800 tracking-tight uppercase">
+            <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight uppercase">
               {activeTab === 'dashboard' && 'Dashboard Overview'}
               {activeTab === 'groups' && 'Shared Ledger Groups'}
               {activeTab === 'profile' && 'My Account Profile'}
               {activeTab === 'admin' && 'Master Administration'}
               {activeTab === 'reference' && 'Export Tech Stack'}
             </h2>
-            <div className="h-4 w-px bg-slate-300"></div>
-            <div className="text-xs text-slate-500 font-medium">
-              Active Session: <span className="text-indigo-600 font-semibold">{currentUser.name}</span>
+            <div className="h-4 w-px bg-slate-300 dark:bg-slate-700"></div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+              Active Session: <span className="text-indigo-600 dark:text-indigo-400 font-semibold">{currentUser.name}</span>
             </div>
           </div>
           
           <div className="flex items-center gap-4">
             {activeTab === 'groups' && selectedGroup && (
-              <span className="bg-indigo-50 text-indigo-700 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border border-indigo-100">
+              <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border border-indigo-100 dark:border-indigo-900/40">
                 Active Group: {selectedGroup.name}
               </span>
             )}
             <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-650 font-bold uppercase text-xs">
+              <button
+                onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+                className="p-1.5 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                title={theme === 'light' ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+              >
+                {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
+              </button>
+              <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-650 dark:text-slate-300 font-bold uppercase text-xs">
                 {currentUser.name.substring(0, 2)}
               </div>
             </div>
@@ -623,6 +839,8 @@ export default function App() {
               users={users}
               currentUserId={currentUser.id}
               currencyRates={currencyRates}
+              onUpdateExpense={handleUpdateExpense}
+              onDeleteExpense={handleDeleteExpense}
             />
           )}
 
@@ -646,6 +864,8 @@ export default function App() {
                     currentUserRole={currentUser.role}
                     onAddExpense={handleAddExpense}
                     onDeleteExpense={handleDeleteExpense}
+                    onUpdateExpense={handleUpdateExpense}
+                    onUpdateGroup={handleUpdateGroup}
                   />
                 ) : (
                   <div className="h-96 border border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center p-6 text-center bg-white shadow-sm">
@@ -665,6 +885,7 @@ export default function App() {
               currentUser={currentUser}
               jwtToken={jwtToken}
               users={users}
+              groups={groups}
               onUpdateUserRole={handleUpdateUserRole}
             />
           )}
@@ -683,6 +904,19 @@ export default function App() {
 
         </main>
       </div>
+
+      {confirmDialog && confirmDialog.isOpen && (
+        <ConfirmDialog
+          isOpen={confirmDialog.isOpen}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          type={confirmDialog.type}
+          confirmLabel={confirmDialog.confirmLabel}
+          cancelLabel={confirmDialog.cancelLabel}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
 
     </div>
   );

@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { Group } from '../types.js';
 import { Plus, Users, Landmark, FileText, ChevronRight } from 'lucide-react';
+import ConfirmDialog from './ConfirmDialog.js';
 
 interface GroupsListProps {
   groups: Group[];
@@ -20,6 +21,12 @@ export default function GroupsList({ groups, selectedGroupId, onSelectGroup, onC
   const [description, setDescription] = useState('');
   const [currency, setCurrency] = useState('USD');
   const [loading, setLoading] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   const currencies = [
     { code: 'USD', name: 'US Dollar ($)' },
@@ -35,18 +42,26 @@ export default function GroupsList({ groups, selectedGroupId, onSelectGroup, onC
     e.preventDefault();
     if (!name.trim()) return;
 
-    setLoading(true);
-    try {
-      await onCreateGroup(name, description, currency);
-      setName('');
-      setDescription('');
-      setCurrency('USD');
-      setShowCreate(false);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    setConfirmDialog({
+      isOpen: true,
+      title: 'Create Shared Room',
+      message: `Are you sure you want to create a new shared room named "${name}"?`,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setLoading(true);
+        try {
+          await onCreateGroup(name, description, currency);
+          setName('');
+          setDescription('');
+          setCurrency('USD');
+          setShowCreate(false);
+        } catch (err) {
+          console.error(err);
+        } finally {
+          setLoading(false);
+        }
+      }
+    });
   };
 
   return (
@@ -173,6 +188,16 @@ export default function GroupsList({ groups, selectedGroupId, onSelectGroup, onC
             );
           })}
         </div>
+      )}
+
+      {confirmDialog && confirmDialog.isOpen && (
+        <ConfirmDialog
+          isOpen={confirmDialog.isOpen}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
       )}
     </div>
   );

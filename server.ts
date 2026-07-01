@@ -344,7 +344,10 @@ app.post('/api/invite/send', (req: Request, res: Response) => {
   simulatedInvites.push(newInvite);
 
   // Return the invite details and a simulation join link
-  const appUrl = process.env.APP_URL || 'http://localhost:3000';
+  let appUrl = process.env.RENDER_EXTERNAL_URL || process.env.APP_URL || 'http://localhost:3000';
+  if (appUrl.endsWith('/')) {
+    appUrl = appUrl.slice(0, -1);
+  }
   const inviteLink = `${appUrl}/?inviteToken=${token}`;
 
   res.json({
@@ -355,7 +358,7 @@ app.post('/api/invite/send', (req: Request, res: Response) => {
 });
 
 // 4. Invite Token Verification Endpoint
-app.get('/api/invite/resolve/:token', (req: Request, res: Response) => {
+app.get('/api/invite/resolve/:token', async (req: Request, res: Response) => {
   const { token } = req.params;
   const invite = simulatedInvites.find(inv => inv.token === token && inv.status === 'pending');
 
@@ -364,18 +367,43 @@ app.get('/api/invite/resolve/:token', (req: Request, res: Response) => {
     return;
   }
 
-  res.json({
-    success: true,
-    invite
-  });
+  try {
+    const formattedEmail = invite.email.toLowerCase().trim();
+    const usersColl = collection(db, 'users');
+    const q = query(usersColl, where('email', '==', formattedEmail));
+    const querySnap = await getDocs(q);
+    const exists = !querySnap.empty;
+    let existingUser = null;
+
+    if (exists) {
+      const uData = querySnap.docs[0].data();
+      existingUser = {
+        id: uData.id,
+        email: uData.email,
+        name: uData.name,
+        role: uData.role,
+        hasPassword: !!uData.passwordHash
+      };
+    }
+
+    res.json({
+      success: true,
+      invite,
+      userExists: exists,
+      existingUser
+    });
+  } catch (err: any) {
+    console.error('Invite resolve error:', err);
+    res.status(500).json({ error: err.message || 'Failed to resolve invite' });
+  }
 });
 
 // 5. Accept Invite Endpoint
 app.post('/api/invite/accept', async (req: Request, res: Response) => {
-  const { token, userName, userEmail, password } = req.body;
+  const { token, userName, userEmail, password, bypassPassword } = req.body;
 
-  if (!token || !userName || !userEmail || !password) {
-    res.status(400).json({ error: 'Token, userName, userEmail, and password are required' });
+  if (!token || !userEmail) {
+    res.status(400).json({ error: 'Token and userEmail are required' });
     return;
   }
 
@@ -392,32 +420,70 @@ app.post('/api/invite/accept', async (req: Request, res: Response) => {
       return;
     }
 
+    // Acknowledge invite status update
     invite.status = 'accepted';
 
-    // 1. Hash the provided password
-    const passwordHash = hashPassword(password);
-
-    // 2. See if user already exists
+    const formattedEmail = userEmail.toLowerCase().trim();
     const usersColl = collection(db, 'users');
-    const q = query(usersColl, where('email', '==', userEmail.toLowerCase().trim()));
+    const q = query(usersColl, where('email', '==', formattedEmail));
     const querySnap = await getDocs(q);
 
     let userId = `usr_${Math.random().toString(36).substr(2, 9)}`;
     let userDoc: any = null;
+    let finalUserName = userName || '';
 
-    if (!querySnap.empty) {
+    const userExists = !querySnap.empty;
+
+    if (userExists) {
       userDoc = querySnap.docs[0].data();
       userId = userDoc.id;
-      // Update password hash if not set
-      await updateDoc(querySnap.docs[0].ref, { passwordHash });
+      finalUserName = userDoc.name;
+
+      // Check if user has a valid bypass from being logged in as target user
+      let isCurrentlyLoggedInAsTarget = false;
+      const authHeader = req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const bearerToken = authHeader.split(' ')[1];
+        try {
+          const decoded = jwt.verify(bearerToken, JWT_SECRET) as any;
+          if (decoded && decoded.email && decoded.email.toLowerCase().trim() === formattedEmail) {
+            isCurrentlyLoggedInAsTarget = true;
+          }
+        } catch (e) {
+          // invalid token, treat as false
+        }
+      }
+
+      if (bypassPassword && isCurrentlyLoggedInAsTarget) {
+        // Safe bypass
+      } else {
+        // Must authenticate with existing password
+        if (!password) {
+          res.status(400).json({ error: 'Password is required to authenticate your existing account.' });
+          return;
+        }
+        const passwordHash = hashPassword(password);
+        if (userDoc.passwordHash && userDoc.passwordHash !== passwordHash) {
+          res.status(401).json({ error: 'Incorrect password for this existing account.' });
+          return;
+        }
+        if (!userDoc.passwordHash) {
+          await updateDoc(querySnap.docs[0].ref, { passwordHash });
+        }
+      }
     } else {
-      // Create new user doc in Firestore
+      // Must sign up
+      if (!userName || !password) {
+        res.status(400).json({ error: 'Full Name and Password are required to create a new account.' });
+        return;
+      }
+      const passwordHash = hashPassword(password);
       const userRef = doc(db, 'users', userId);
       userDoc = {
         id: userId,
-        email: userEmail.toLowerCase().trim(),
+        email: formattedEmail,
         name: userName.trim(),
-        role: invite.role, // Joins with role specified in invite
+        role: invite.role,
         passwordHash,
         createdAt: new Date().toISOString()
       };
@@ -452,7 +518,7 @@ app.post('/api/invite/accept', async (req: Request, res: Response) => {
 
     // 4. Issue a JWT token for the joining user
     const jwtToken = jwt.sign(
-      { id: userId, email: userEmail, name: userName, role: invite.role },
+      { id: userId, email: formattedEmail, name: finalUserName, role: userDoc?.role || invite.role },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
@@ -464,10 +530,10 @@ app.post('/api/invite/accept', async (req: Request, res: Response) => {
       role: invite.role,
       user: {
         id: userId,
-        name: userName,
-        email: userEmail,
-        role: invite.role,
-        createdAt: new Date().toISOString()
+        name: finalUserName,
+        email: formattedEmail,
+        role: userDoc?.role || invite.role,
+        createdAt: userDoc?.createdAt || new Date().toISOString()
       }
     });
   } catch (err: any) {
