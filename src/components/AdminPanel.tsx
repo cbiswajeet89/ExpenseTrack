@@ -200,7 +200,7 @@ export default function AdminPanel({ currentUser, jwtToken, users, groups, onUpd
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
             <thead>
-              <tr className="bg-slate-50 dark:bg-slate-850/50 border-b border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold">
+              <tr className="bg-slate-150/85 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold">
                 <th className="px-6 py-3">Member Details</th>
                 <th className="px-6 py-3">Unique ID</th>
                 <th className="px-6 py-3">Assigned Role</th>
@@ -209,7 +209,7 @@ export default function AdminPanel({ currentUser, jwtToken, users, groups, onUpd
             </thead>
             <tbody className="divide-y divide-slate-50 dark:divide-slate-850/40">
               {users.map((u) => (
-                <tr key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition">
+                <tr key={u.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/30 transition group">
                   <td className="px-6 py-4">
                     <div className="font-semibold text-slate-800 dark:text-slate-200">{u.name}</div>
                     <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{u.email}</div>
@@ -245,7 +245,7 @@ export default function AdminPanel({ currentUser, jwtToken, users, groups, onUpd
                       disabled={u.id === currentUser.id || deletingUserId !== null}
                       onClick={() => setConfirmDeleteUser(u)}
                       title={u.id === currentUser.id ? "You cannot remove yourself" : `Remove ${u.name} from application`}
-                      className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                      className={`p-1.5 rounded-lg border transition duration-200 cursor-pointer opacity-0 group-hover:opacity-100 ${
                         u.id === currentUser.id 
                           ? 'border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 text-slate-300 dark:text-slate-600 cursor-not-allowed' 
                           : 'border-red-100 dark:border-red-900 bg-red-50/50 dark:bg-red-950/20 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-700 dark:hover:text-red-300'
@@ -280,7 +280,7 @@ export default function AdminPanel({ currentUser, jwtToken, users, groups, onUpd
           ) : (
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-50 dark:bg-slate-850/50 border-b border-slate-100 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold">
+                <tr className="bg-slate-150/85 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold">
                   <th className="px-6 py-3">Group details</th>
                   <th className="px-6 py-3">Unique ID</th>
                   <th className="px-6 py-3">Base Currency</th>

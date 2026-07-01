@@ -10,7 +10,7 @@ import { UserCheck, Shield, Key, AlertCircle, Sparkles } from 'lucide-react';
 interface ProfileSettingsProps {
   currentUser: User;
   jwtToken: string;
-  onProfileUpdate: (user: User, token: string) => void;
+  onProfileUpdate: (user: User, token: string, refreshToken?: string) => void;
 }
 
 export default function ProfileSettings({ currentUser, jwtToken, onProfileUpdate }: ProfileSettingsProps) {
@@ -57,7 +57,7 @@ export default function ProfileSettings({ currentUser, jwtToken, onProfileUpdate
         throw new Error(data.error || 'Failed to update profile.');
       }
 
-      onProfileUpdate(data.user, data.token);
+      onProfileUpdate(data.user, data.token, data.refreshToken);
       setSuccess('Profile details successfully synchronized with secure database.');
       setPassword('');
       setConfirmPassword('');

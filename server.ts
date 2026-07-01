@@ -157,12 +157,19 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     const token = jwt.sign(
       { id: userId, email: newUser.email, name: newUser.name, role: newUser.role },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: userId, type: 'refresh' },
+      JWT_SECRET,
+      { expiresIn: '30d' }
     );
 
     res.json({
       success: true,
       token,
+      refreshToken,
       user: {
         id: userId,
         email: newUser.email,
@@ -250,12 +257,19 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
     const token = jwt.sign(
       { id: userDoc.id, email: userDoc.email, name: userDoc.name, role: userDoc.role },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: userDoc.id, type: 'refresh' },
+      JWT_SECRET,
+      { expiresIn: '30d' }
     );
 
     res.json({
       success: true,
       token,
+      refreshToken,
       user: {
         id: userDoc.id,
         email: userDoc.email,
@@ -267,6 +281,95 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error('[Login API Error]:', err);
     res.status(500).json({ error: err.message || 'Error occurred during authentication.' });
+  }
+});
+
+app.get('/api/auth/me', authenticateJWT, async (req: AuthenticatedRequest, res: Response) => {
+  if (!req.user || !req.user.id) {
+    res.status(401).json({ error: 'Unauthorized: User ID not found in token' });
+    return;
+  }
+
+  try {
+    const userRef = doc(db, 'users', req.user.id);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      res.status(404).json({ error: 'User profile not found in database.' });
+      return;
+    }
+
+    const userData = userSnap.data();
+
+    res.json({
+      success: true,
+      user: {
+        id: req.user.id,
+        email: userData.email,
+        name: userData.name,
+        role: userData.role,
+        createdAt: userData.createdAt || new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    console.error('[API Auth Me Error]:', err);
+    res.status(500).json({ error: err.message || 'Error occurred while fetching profile.' });
+  }
+});
+
+app.post('/api/auth/refresh', async (req: Request, res: Response) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    res.status(400).json({ error: 'Refresh token is required.' });
+    return;
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, JWT_SECRET) as any;
+
+    if (!decoded || decoded.type !== 'refresh' || !decoded.id) {
+      res.status(403).json({ error: 'Forbidden: Invalid or expired refresh token.' });
+      return;
+    }
+
+    const userRef = doc(db, 'users', decoded.id);
+    const userSnap = await getDoc(userRef);
+
+    if (!userSnap.exists()) {
+      res.status(404).json({ error: 'User profile not found.' });
+      return;
+    }
+
+    const userData = userSnap.data();
+
+    const token = jwt.sign(
+      { id: userData.id, email: userData.email, name: userData.name, role: userData.role },
+      JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    const newRefreshToken = jwt.sign(
+      { id: userData.id, type: 'refresh' },
+      JWT_SECRET,
+      { expiresIn: '30d' }
+    );
+
+    res.json({
+      success: true,
+      token,
+      refreshToken: newRefreshToken,
+      user: {
+        id: userData.id,
+        email: userData.email,
+        name: userData.name,
+        role: userData.role,
+        createdAt: userData.createdAt || new Date().toISOString()
+      }
+    });
+  } catch (err: any) {
+    console.error('[Refresh API Error]:', err);
+    res.status(403).json({ error: 'Forbidden: Invalid or expired refresh token.' });
   }
 });
 
@@ -310,12 +413,19 @@ app.put('/api/users/profile', authenticateJWT, async (req: AuthenticatedRequest,
     const token = jwt.sign(
       { id: userId, email: finalEmail, name: finalName, role: finalRole },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: userId, type: 'refresh' },
+      JWT_SECRET,
+      { expiresIn: '30d' }
     );
 
     res.json({
       success: true,
       token,
+      refreshToken,
       user: {
         id: userId,
         email: finalEmail,
@@ -530,12 +640,19 @@ app.post('/api/invite/accept', async (req: Request, res: Response) => {
     const jwtToken = jwt.sign(
       { id: userId, email: formattedEmail, name: finalUserName, role: userDoc?.role || invite.role },
       JWT_SECRET,
-      { expiresIn: '24h' }
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: userId, type: 'refresh' },
+      JWT_SECRET,
+      { expiresIn: '30d' }
     );
 
     res.json({
       success: true,
       token: jwtToken,
+      refreshToken,
       groupId: invite.groupId,
       role: invite.role,
       user: {

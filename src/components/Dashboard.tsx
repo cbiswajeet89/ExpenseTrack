@@ -566,7 +566,7 @@ export default function Dashboard({
           ) : (
             <table className="w-full text-left text-xs border-collapse">
               <thead>
-                <tr className="bg-slate-100/50 dark:bg-slate-850/30 border-b border-slate-150 dark:border-slate-800 text-slate-500 dark:text-slate-400 font-bold uppercase tracking-wider text-[10px]">
+                <tr className="bg-slate-150/80 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold uppercase tracking-wider text-[10px]">
                   <th className="px-6 py-3">Date</th>
                   <th className="px-6 py-3">Description</th>
                   <th className="px-6 py-3">Category</th>

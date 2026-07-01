@@ -8,7 +8,7 @@ import { User, UserRole } from '../types.js';
 import { Shield, Key, Sparkles, UserCheck, Lock } from 'lucide-react';
 
 interface AuthScreenProps {
-  onAuthSuccess: (user: User, token: string) => void;
+  onAuthSuccess: (user: User, token: string, refreshToken: string) => void;
 }
 
 export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
@@ -65,7 +65,8 @@ export default function AuthScreen({ onAuthSuccess }: AuthScreenProps) {
           role: data.user.role,
           createdAt: data.user.createdAt
         },
-        data.token
+        data.token,
+        data.refreshToken || ''
       );
     } catch (err: any) {
       setError(err.message || 'Something went wrong during authentication.');

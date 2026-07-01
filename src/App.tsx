@@ -4,6 +4,8 @@
  */
 
 import React, { useState, useEffect } from 'react';
+import { onSnapshot, collection, query, where } from 'firebase/firestore';
+import { db } from './lib/firebase.js';
 import { User, Group, Expense, UserRole } from './types.js';
 import { 
   seedDatabaseIfEmpty, 
@@ -131,6 +133,56 @@ export default function App() {
             setInviteExistingUser(resolveData.existingUser || null);
           }
         }
+
+        // 4. Try to restore session from localStorage using Access/Refresh Tokens
+        const storedAccessToken = localStorage.getItem('accessToken');
+        const storedRefreshToken = localStorage.getItem('refreshToken');
+
+        if (storedAccessToken && storedRefreshToken) {
+          try {
+            // Check if current access token is still valid via /api/auth/me
+            const meRes = await fetch('/api/auth/me', {
+              headers: {
+                'Authorization': `Bearer ${storedAccessToken}`
+              }
+            });
+
+            if (meRes.ok) {
+              const meData = await meRes.json();
+              if (meData.success && meData.user) {
+                setCurrentUser(meData.user);
+                setJwtToken(storedAccessToken);
+              }
+            } else {
+              // Access token is expired or invalid, attempt to refresh it
+              const refreshRes = await fetch('/api/auth/refresh', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ refreshToken: storedRefreshToken })
+              });
+
+              if (refreshRes.ok) {
+                const refreshData = await refreshRes.json();
+                if (refreshData.success && refreshData.token) {
+                  setCurrentUser(refreshData.user);
+                  setJwtToken(refreshData.token);
+                  localStorage.setItem('accessToken', refreshData.token);
+                  localStorage.setItem('refreshToken', refreshData.refreshToken);
+                  localStorage.setItem('currentUser', JSON.stringify(refreshData.user));
+                }
+              } else {
+                // Refresh failed: clear credentials to force re-auth
+                localStorage.removeItem('accessToken');
+                localStorage.removeItem('refreshToken');
+                localStorage.removeItem('currentUser');
+              }
+            }
+          } catch (err) {
+            console.error('Session restoration error:', err);
+          }
+        }
       } catch (err) {
         console.error('Initialization error:', err);
       } finally {
@@ -141,62 +193,95 @@ export default function App() {
     initApp();
   }, []);
 
-  // Sync state data on user authentication
+  // Real-time synchronization for users and groups list
   useEffect(() => {
-    const syncUserData = async () => {
-      if (!currentUser) return;
-      setLoading(true);
-      try {
-        const fetchGroupsPromise = currentUser.role === 'admin' 
-          ? getAllGroups() 
-          : getGroupsForUser(currentUser.id);
+    if (!currentUser) {
+      setUsers([]);
+      setGroups([]);
+      return;
+    }
 
-        const [allUsers, myGroups] = await Promise.all([
-          getAllUsers(),
-          fetchGroupsPromise
-        ]);
-        
-        setUsers(allUsers);
-        setGroups(myGroups);
+    // Subscribe to all users in real-time
+    const unsubscribeUsers = onSnapshot(collection(db, 'users'), (snapshot) => {
+      const list: User[] = [];
+      snapshot.forEach(d => {
+        list.push(d.data() as User);
+      });
+      setUsers(list);
+    }, (error) => {
+      console.error('Real-time sync error for users:', error);
+    });
 
-        // Pre-select the seeded group if it exists
-        const preseeded = myGroups.find(g => g.id === 'grp_apartment_3b');
-        if (preseeded) {
-          setSelectedGroupId(preseeded.id);
-        } else if (myGroups.length > 0) {
-          setSelectedGroupId(myGroups[0].id);
+    // Subscribe to groups (either all for admin, or where user is member)
+    const groupsQuery = currentUser.role === 'admin'
+      ? collection(db, 'groups')
+      : query(collection(db, 'groups'), where('members', 'array-contains', currentUser.id));
+
+    const unsubscribeGroups = onSnapshot(groupsQuery, (snapshot) => {
+      const list: Group[] = [];
+      snapshot.forEach(d => {
+        list.push(d.data() as Group);
+      });
+      setGroups(list);
+
+      // Manage group selection reactively
+      setSelectedGroupId(prev => {
+        if (prev && list.some(g => g.id === prev)) {
+          return prev;
         }
-      } catch (err) {
-        console.error('Error syncing user data:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
+        const preseeded = list.find(g => g.id === 'grp_apartment_3b');
+        if (preseeded) {
+          return preseeded.id;
+        } else if (list.length > 0) {
+          return list[0].id;
+        }
+        return null;
+      });
+    }, (error) => {
+      console.error('Real-time sync error for groups:', error);
+    });
 
-    syncUserData();
+    return () => {
+      unsubscribeUsers();
+      unsubscribeGroups();
+    };
   }, [currentUser]);
 
-  // Sync expenses list when active group changes
+  // Real-time synchronization for active group's expense logs
   useEffect(() => {
-    const syncExpenses = async () => {
-      if (!selectedGroupId) {
-        setExpenses([]);
-        return;
-      }
-      try {
-        const logs = await getExpensesForGroup(selectedGroupId);
-        setExpenses(logs);
-      } catch (err) {
-        console.error('Error syncing expenses:', err);
-      }
+    if (!currentUser || !selectedGroupId) {
+      setExpenses([]);
+      return;
+    }
+
+    const expensesQuery = query(
+      collection(db, 'expenses'),
+      where('groupId', '==', selectedGroupId)
+    );
+
+    const unsubscribeExpenses = onSnapshot(expensesQuery, (snapshot) => {
+      const list: Expense[] = [];
+      snapshot.forEach(d => {
+        list.push(d.data() as Expense);
+      });
+      // Sort by date descending
+      const sorted = list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setExpenses(sorted);
+    }, (error) => {
+      console.error('Real-time sync error for expenses:', error);
+    });
+
+    return () => {
+      unsubscribeExpenses();
     };
+  }, [currentUser, selectedGroupId]);
 
-    syncExpenses();
-  }, [selectedGroupId]);
-
-  const handleAuthSuccess = (user: User, token: string) => {
+  const handleAuthSuccess = (user: User, token: string, refreshToken: string) => {
     setCurrentUser(user);
     setJwtToken(token);
+    localStorage.setItem('accessToken', token);
+    localStorage.setItem('refreshToken', refreshToken);
+    localStorage.setItem('currentUser', JSON.stringify(user));
     setActiveTab('dashboard');
   };
 
@@ -211,6 +296,9 @@ export default function App() {
         setCurrentUser(null);
         setJwtToken('');
         setSelectedGroupId(null);
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        localStorage.removeItem('currentUser');
         setConfirmDialog(null);
       }
     });
@@ -384,9 +472,14 @@ export default function App() {
   };
 
   // Synchronize profile updates on current user & list
-  const handleProfileUpdate = (updatedUser: User, newToken: string) => {
+  const handleProfileUpdate = (updatedUser: User, newToken: string, newRefreshToken?: string) => {
     setCurrentUser(updatedUser);
     setJwtToken(newToken);
+    localStorage.setItem('accessToken', newToken);
+    if (newRefreshToken) {
+      localStorage.setItem('refreshToken', newRefreshToken);
+    }
+    localStorage.setItem('currentUser', JSON.stringify(updatedUser));
     setUsers(prev => prev.map(u => u.id === updatedUser.id ? updatedUser : u));
   };
 
@@ -469,6 +562,9 @@ export default function App() {
       // 4. Set state, log them in, and open the exact group
       setCurrentUser(matchedUser);
       setJwtToken(data.token);
+      localStorage.setItem('accessToken', data.token);
+      localStorage.setItem('refreshToken', data.refreshToken || '');
+      localStorage.setItem('currentUser', JSON.stringify(matchedUser));
       setSelectedGroupId(pendingInvite.groupId);
       setPendingInvite(null);
       setInviteToken(null);
@@ -671,7 +767,7 @@ export default function App() {
   const selectedGroup = groups.find(g => g.id === selectedGroupId);
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col md:flex-row">
+    <div className="min-h-screen md:h-screen md:overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 font-sans flex flex-col md:flex-row">
       
       {/* MOBILE TOP BAR */}
       <header className="md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 px-4 py-3 flex items-center justify-between">
@@ -858,7 +954,7 @@ export default function App() {
       </nav>
 
       {/* PRIMARY WORKSPACE CONTENT */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+      <div className="flex-1 flex flex-col min-w-0 md:h-screen md:overflow-y-auto pb-16 md:pb-0">
         
         {/* DESKTOP HEADER */}
         <header className="hidden md:flex h-16 border-b border-slate-200 dark:border-slate-850 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs px-8 items-center justify-between shadow-sm sticky top-0 z-30 shrink-0">
