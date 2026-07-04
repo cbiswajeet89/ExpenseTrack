@@ -22,16 +22,27 @@ interface SettlementMatrixProps {
   expenses: Expense[];
   users: User[];
   currentUserId: string;
+  selectedGroupId?: string | null;
+  onSelectGroup?: (id: string) => void;
 }
 
 export default function SettlementMatrix({ 
   groups, 
   expenses, 
   users, 
-  currentUserId 
+  currentUserId,
+  selectedGroupId,
+  onSelectGroup
 }: SettlementMatrixProps) {
   // Select active group for settlement matrix view
-  const [activeGroupId, setActiveGroupId] = useState<string>(groups[0]?.id || '');
+  const [activeGroupId, setActiveGroupId] = useState<string>(selectedGroupId || groups[0]?.id || '');
+
+  // Sync active group with selectedGroupId from parent
+  React.useEffect(() => {
+    if (selectedGroupId) {
+      setActiveGroupId(selectedGroupId);
+    }
+  }, [selectedGroupId]);
 
   // Map of userId to User object for easy lookup
   const userMap = useMemo(() => {
@@ -222,7 +233,13 @@ export default function SettlementMatrix({
             </label>
             <select
               value={activeGroupId}
-              onChange={(e) => setActiveGroupId(e.target.value)}
+              onChange={(e) => {
+                const newId = e.target.value;
+                setActiveGroupId(newId);
+                if (onSelectGroup) {
+                  onSelectGroup(newId);
+                }
+              }}
               className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-150 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
             >
               {groups.map(g => (

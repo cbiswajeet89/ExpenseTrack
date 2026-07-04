@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+@theme {
+  --color-slate-850: #1e293b;
+}
+
 @variant dark (&:where(.dark, .dark *));
 
 :root {
@@ -38,7 +42,11 @@
   & .bg-slate-200,
   & .bg-gray-200,
   & .bg-slate-150\/80,
-  & .bg-slate-150\/70 {
+  & .bg-slate-150\/70,
+  & .bg-slate-850,
+  & .bg-slate-850\/50,
+  & .bg-slate-850\/30,
+  & .bg-slate-850\/20 {
     background-color: #1e293b !important;
   }
 
@@ -107,7 +115,9 @@
   & .border-gray-100,
   & .border-gray-150,
   & .border-gray-200,
-  & .border-slate-800\/80 {
+  & .border-slate-800\/80,
+  & .border-slate-850,
+  & .border-slate-850\/40 {
     border-color: #1e293b !important;
   }
 

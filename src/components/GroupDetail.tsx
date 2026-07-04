@@ -102,8 +102,6 @@ export default function GroupDetail({
         header: true,
         form: false,
         ledger: true,
-        invite: true,
-        report: true,
         log: false
       };
     } catch {
@@ -111,8 +109,6 @@ export default function GroupDetail({
         header: true,
         form: false,
         ledger: true,
-        invite: true,
-        report: true,
         log: false
       };
     }
@@ -126,8 +122,6 @@ export default function GroupDetail({
         header: true,
         form: false,
         ledger: true,
-        invite: true,
-        report: true,
         log: false
       });
     } catch {
@@ -135,8 +129,6 @@ export default function GroupDetail({
         header: true,
         form: false,
         ledger: true,
-        invite: true,
-        report: true,
         log: false
       });
     }
@@ -686,17 +678,7 @@ export default function GroupDetail({
     }
   };
 
-  // Form States - Invite
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<UserRole>('member');
-  const [inviteLink, setInviteLink] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [inviteLoading, setInviteLoading] = useState(false);
 
-  // Automated Monthly Report States
-  const [reportMarkdown, setReportMarkdown] = useState('');
-  const [reportLoading, setReportLoading] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState('2026-06');
 
   const categories = propCategories && propCategories.length > 0 ? propCategories : [
     'Food & Groceries',
@@ -981,69 +963,7 @@ export default function GroupDetail({
     });
   };
 
-  // Generate Email invitation simulate link
-  const handleInviteSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inviteEmail.trim()) return;
 
-    setInviteLoading(true);
-    setInviteLink('');
-    try {
-      const res = await fetch('/api/invite/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groupId: group.id,
-          groupName: group.name,
-          email: inviteEmail,
-          role: inviteRole
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setInviteLink(data.inviteLink);
-        setInviteEmail('');
-      } else {
-        alert(data.error || 'Failed to send invite');
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setInviteLoading(false);
-    }
-  };
-
-  const copyInvite = () => {
-    navigator.clipboard.writeText(inviteLink);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  // Trigger automated monthly reports API
-  const handleGenerateReport = async () => {
-    setReportLoading(true);
-    setReportMarkdown('');
-    try {
-      const res = await fetch('/api/reports/monthly', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          groupName: group.name,
-          expenses: expenses,
-          currency: group.currency,
-          month: selectedMonth
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setReportMarkdown(data.reportMarkdown);
-      }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setReportLoading(false);
-    }
-  };
 
   return (
     <div className="space-y-8 font-sans">
@@ -2048,166 +1968,7 @@ export default function GroupDetail({
         </div>
       )}
 
-        {/* INVITE NEW MEMBERS VIA SECURE EMAIL LINK */}
-        {minimizedCards['invite'] ? (
-          renderMinimizedCard('invite', 'Roommate Invitation Form', <UserPlus className="w-4.5 h-4.5" />)
-        ) : (
-          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
-            <div className="flex justify-between items-center mb-1.5">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-                <UserPlus className="w-4.5 h-4.5 text-gray-500" /> Invite Roomies / Splitters
-              </h3>
-              <button
-                onClick={() => toggleCardMinimize('invite')}
-                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
-                title="Minimize card"
-              >
-                <Minus className="w-4 h-4" />
-              </button>
-            </div>
-          <p className="text-xs text-gray-400 mb-4">
-            Simulate role-assigned email invitation links to instantly add other splitters.
-          </p>
 
-          <form onSubmit={handleInviteSubmit} className="space-y-3.5">
-            <div>
-              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Email Address</label>
-              <input
-                type="email"
-                required
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="roommate@example.com"
-                className="w-full px-3 py-1.5 border border-gray-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-              />
-            </div>
-
-            <div>
-              <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Assigned Group Role</label>
-              <select
-                value={inviteRole}
-                onChange={(e) => setInviteRole(e.target.value as UserRole)}
-                className="w-full px-3 py-1.5 border border-gray-200 rounded-xl bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-              >
-                <option value="member">Group Member (Splitter)</option>
-                <option value="manager">Billing Manager (Add / Edit Auditor)</option>
-              </select>
-            </div>
-
-            <button
-              type="submit"
-              disabled={inviteLoading}
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 rounded-xl text-xs transition shadow-md shadow-indigo-100"
-            >
-              {inviteLoading ? 'Generating Token...' : 'Generate Invite Link'}
-            </button>
-          </form>
-
-          {inviteLink && (
-            <div className="mt-4 p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-2">
-              <span className="text-[10px] font-bold text-indigo-800 block uppercase tracking-wider">
-                ✉️ Invitation Link Generated!
-              </span>
-              <p className="text-[10px] text-gray-500">
-                You can copy the simulation link below and load it in a browser or paste it into the search tab to simulate a joining roommate accepting the role.
-              </p>
-              <div className="flex gap-1">
-                <input
-                  type="text"
-                  readOnly
-                  value={inviteLink}
-                  className="flex-1 px-2.5 py-1 bg-white border border-gray-200 rounded-lg text-[10px] font-mono text-gray-600 focus:outline-none"
-                />
-                <button
-                  onClick={copyInvite}
-                  className="p-1.5 bg-gray-800 text-white hover:bg-gray-900 rounded-lg transition"
-                >
-                  {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
-              </div>
-            </div>
-          )}
-          </div>
-        )}
-
-        {/* AUTOMATED MONTHLY REPORTS MODULE */}
-        {minimizedCards['report'] ? (
-          renderMinimizedCard('report', 'Automated Billing Reports Tool', <FileSpreadsheet className="w-4.5 h-4.5" />)
-        ) : (
-          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
-            <div className="flex justify-between items-center mb-1.5">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-                <FileSpreadsheet className="w-4.5 h-4.5 text-gray-500" /> Automated Billing Reports
-              </h3>
-              <button
-                onClick={() => toggleCardMinimize('report')}
-                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
-                title="Minimize card"
-              >
-                <Minus className="w-4 h-4" />
-              </button>
-            </div>
-          <p className="text-xs text-gray-400 mb-4">
-            Audits group splits, categories, and itemized logs for your current billing month.
-          </p>
-
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-1">Select Cycle</label>
-                <select
-                  value={selectedMonth}
-                  onChange={(e) => setSelectedMonth(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-200 rounded-xl bg-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="2026-06">June 2026</option>
-                  <option value="2026-05">May 2026</option>
-                  <option value="2026-04">April 2026</option>
-                </select>
-              </div>
-
-              <div className="flex items-end">
-                <button
-                  type="button"
-                  onClick={handleGenerateReport}
-                  disabled={reportLoading || expenses.length === 0}
-                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-1.5 px-3 rounded-xl text-xs transition disabled:opacity-50"
-                >
-                  {reportLoading ? 'Analyzing...' : 'Generate Report'}
-                </button>
-              </div>
-            </div>
-
-            {reportMarkdown && (
-              <div className="border border-indigo-100 rounded-2xl p-4 bg-indigo-50/10 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-bold text-indigo-700 uppercase tracking-wider block">
-                    📊 Secure PDF / Audited Log:
-                  </span>
-                  <button 
-                    onClick={() => {
-                      const element = document.createElement("a");
-                      const file = new Blob([reportMarkdown], {type: 'text/plain'});
-                      element.href = URL.createObjectURL(file);
-                      element.download = `Splitwise_Report_${group.name.replace(/\s+/g, '_')}.md`;
-                      document.body.appendChild(element);
-                      element.click();
-                      document.body.removeChild(element);
-                    }}
-                    className="text-[10px] text-indigo-600 font-bold hover:underline"
-                  >
-                    Download .md
-                  </button>
-                </div>
-                
-                <div className="max-h-60 overflow-y-auto text-[11px] font-mono leading-relaxed bg-white border border-gray-100 p-3 rounded-xl text-gray-700 whitespace-pre-wrap">
-                  {reportMarkdown}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
       </div>
 
       </div>

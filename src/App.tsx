@@ -55,12 +55,19 @@ import {
   Database,
   ChevronLeft,
   ChevronRight,
-  Menu
+  Menu,
+  FileSpreadsheet,
+  Copy,
+  Check,
+  X,
+  Landmark,
+  ChevronDown
 } from 'lucide-react';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showGroupSelector, setShowGroupSelector] = useState(false);
   const [jwtToken, setJwtToken] = useState('');
   const [groups, setGroups] = useState<Group[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -109,8 +116,22 @@ export default function App() {
   });
 
   const [isGroupsPanelCollapsed, setIsGroupsPanelCollapsed] = useState(() => {
-    return localStorage.getItem('isGroupsPanelCollapsed') === 'true';
+    const cached = localStorage.getItem('isGroupsPanelCollapsed');
+    return cached === null ? true : cached === 'true';
   });
+
+  // Header Nav Bar Tools States
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showReportsModal, setShowReportsModal] = useState(false);
+  const [formInviteEmail, setFormInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'member' | 'manager'>('member');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteLink, setInviteLink] = useState('');
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const [selectedMonth, setSelectedMonth] = useState('2026-06');
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportMarkdown, setReportMarkdown] = useState('');
 
   const toggleGroupsPanelCollapse = () => {
     setIsGroupsPanelCollapsed(prev => {
@@ -831,6 +852,30 @@ export default function App() {
           SPLITWISE.PRO
         </h1>
         <div className="flex items-center gap-2">
+          {selectedGroup && (
+            <>
+              <button
+                onClick={() => {
+                  setShowInviteModal(true);
+                  setInviteLink('');
+                }}
+                className="p-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-100/50 dark:border-indigo-900/40 transition cursor-pointer"
+                title="Invite Roommates"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => {
+                  setShowReportsModal(true);
+                  setReportMarkdown('');
+                }}
+                className="p-1.5 bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-100/50 dark:border-indigo-900/40 transition cursor-pointer"
+                title="Reports Tool"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
           <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 border border-indigo-100 dark:border-indigo-900/40 px-2 py-0.5 rounded capitalize">
             {currentUser.role}
           </span>
@@ -1111,9 +1156,74 @@ export default function App() {
             
             <div className="flex items-center gap-4">
               {(activeTab === 'groups' || activeTab === 'matrix') && selectedGroup && (
-                <span className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border border-indigo-100 dark:border-indigo-900/40">
-                  Active Group: {selectedGroup.name}
-                </span>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowGroupSelector(!showGroupSelector)}
+                      className="bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 text-[10px] uppercase font-bold tracking-wider px-3 py-1.5 rounded-full border border-indigo-100 dark:border-indigo-900/40 hover:bg-indigo-100/50 dark:hover:bg-indigo-900/60 transition cursor-pointer flex items-center gap-1 focus:outline-none"
+                    >
+                      <span>Active Group: {selectedGroup.name}</span>
+                      <ChevronDown className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    </button>
+
+                    {showGroupSelector && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-10" 
+                          onClick={() => setShowGroupSelector(false)}
+                        />
+                        <div className="absolute left-0 mt-2 w-56 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl shadow-xl py-1.5 z-20 animate-in fade-in slide-in-from-top-1 duration-100 max-h-60 overflow-y-auto">
+                          <div className="px-3 py-1.5 border-b border-slate-50 dark:border-slate-850 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                            Select Shared Group
+                          </div>
+                          {groups.map((g) => (
+                            <button
+                              key={g.id}
+                              onClick={() => {
+                                setSelectedGroupId(g.id);
+                                setShowGroupSelector(false);
+                              }}
+                              className={`w-full text-left px-3 py-2 text-xs transition-colors flex items-center justify-between ${
+                                g.id === selectedGroupId
+                                  ? 'bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400 font-semibold'
+                                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-850'
+                              }`}
+                            >
+                              <span className="truncate pr-2">{g.name}</span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {g.currency}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      setShowInviteModal(true);
+                      setInviteLink('');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-105 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-semibold border border-indigo-100/50 dark:border-indigo-900/40 transition cursor-pointer"
+                    title="Invite roommate"
+                  >
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Invite Roomies</span>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setShowReportsModal(true);
+                      setReportMarkdown('');
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-105 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 rounded-xl text-xs font-semibold border border-indigo-100/50 dark:border-indigo-900/40 transition cursor-pointer"
+                    title="Automated billing reports"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                    <span>Reports Tool</span>
+                  </button>
+                </div>
               )}
               <div className="flex items-center gap-2">
                 <button
@@ -1207,18 +1317,20 @@ export default function App() {
           )}
 
           {activeTab === 'groups' && (
-            <div className="flex flex-col md:flex-row gap-6">
-              {/* Active Groups Panel */}
+            <div className="flex flex-col gap-6">
+              {/* Active Rooms/Groups Collapsible Panel at the Top */}
               {!isGroupsPanelCollapsed ? (
-                <div className="w-full md:w-80 shrink-0 border-b md:border-b-0 md:border-r border-slate-200/50 pb-4 md:pb-0 md:pr-4">
-                  <div className="flex items-center justify-between mb-3 bg-slate-50 dark:bg-slate-850/30 p-2.5 rounded-xl border border-slate-150 dark:border-slate-800">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Active Rooms / Groups</span>
+                <div className="w-full bg-slate-50/50 dark:bg-slate-900/40 p-4 rounded-2xl border border-slate-200/50 dark:border-slate-800 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-200/30 dark:border-slate-800 pb-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                      <Landmark className="w-4 h-4 text-indigo-500" /> Active Rooms / Groups
+                    </span>
                     <button 
                       onClick={() => setIsGroupsPanelCollapsed(true)}
-                      className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-650 dark:hover:text-indigo-400 transition cursor-pointer shadow-2xs"
+                      className="px-2.5 py-1 text-[11px] font-bold text-slate-500 hover:text-indigo-650 dark:hover:text-indigo-400 hover:bg-slate-55 dark:hover:bg-slate-800 rounded-lg transition cursor-pointer flex items-center gap-1 border border-slate-200 dark:border-slate-750 bg-white dark:bg-slate-950 shadow-2xs"
                       title="Collapse Panel"
                     >
-                      <ChevronLeft className="w-4 h-4" />
+                      <ChevronLeft className="w-3.5 h-3.5 rotate-90" /> Collapsed View
                     </button>
                   </div>
                   <GroupsList
@@ -1226,38 +1338,30 @@ export default function App() {
                     selectedGroupId={selectedGroupId}
                     onSelectGroup={(id) => setSelectedGroupId(id)}
                     onCreateGroup={handleCreateGroup}
+                    layout="horizontal"
                   />
                 </div>
               ) : (
-                <div className="shrink-0 flex flex-col gap-2">
-                  {/* Collapsed Panel Strip on Desktop */}
-                  <div className="hidden md:flex flex-col items-center py-4 px-2 border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 shrink-0 rounded-2xl w-14">
-                    <button 
-                      onClick={() => setIsGroupsPanelCollapsed(false)}
-                      className="p-2 bg-white dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-750 rounded-xl text-slate-650 dark:text-slate-350 hover:text-indigo-600 transition shadow-xs cursor-pointer"
-                      title="Expand Panel"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
-                    <div className="mt-8 [writing-mode:vertical-lr] rotate-180 text-[11px] font-bold select-none whitespace-nowrap flex items-center gap-1">
-                      <span className="text-indigo-600 dark:text-indigo-400 font-extrabold uppercase tracking-widest">Active Rooms</span>
-                      {selectedGroup && (
-                        <>
-                          <span className="text-slate-300 dark:text-slate-600 mx-1">•</span>
-                          <span className="text-slate-700 dark:text-slate-300 normal-case font-semibold">{selectedGroup.name}</span>
-                        </>
-                      )}
-                    </div>
+                <div className="w-full bg-slate-50/50 dark:bg-slate-900/40 px-4 py-2.5 rounded-2xl border border-slate-200/50 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 font-mono flex items-center gap-1.5">
+                      <Landmark className="w-4 h-4" /> Active Room:
+                    </span>
+                    {selectedGroup ? (
+                      <span className="font-semibold text-slate-800 dark:text-slate-200 bg-white dark:bg-slate-850 px-2.5 py-1 rounded-xl border border-slate-150 dark:border-slate-750 font-mono text-xs">
+                        {selectedGroup.name} ({selectedGroup.currency} {(selectedGroup.totalExpense || 0).toFixed(2)})
+                      </span>
+                    ) : (
+                      <span className="text-slate-400 italic text-xs">None selected</span>
+                    )}
                   </div>
-                  {/* Collapsed Expand Button on Mobile */}
-                  <div className="md:hidden">
-                    <button 
-                      onClick={() => setIsGroupsPanelCollapsed(false)}
-                      className="w-full py-2.5 bg-white dark:bg-slate-900 hover:bg-slate-50 border border-slate-200 dark:border-slate-850 rounded-xl text-xs font-bold text-indigo-650 dark:text-indigo-400 flex items-center justify-center gap-1.5 transition shadow-2xs cursor-pointer"
-                    >
-                      <ChevronRight className="w-4 h-4" /> Expand Active Groups Panel {selectedGroup ? `(${selectedGroup.name})` : ''}
-                    </button>
-                  </div>
+                  <button 
+                    onClick={() => setIsGroupsPanelCollapsed(false)}
+                    className="px-2.5 py-1 text-[11px] font-bold text-indigo-650 dark:text-indigo-400 hover:bg-indigo-50/50 dark:hover:bg-indigo-950/20 rounded-lg border border-indigo-100 dark:border-indigo-900/40 bg-white dark:bg-slate-950 transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                    title="Expand Panel"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5 -rotate-90" /> Expand Rooms / Groups List
+                  </button>
                 </div>
               )}
 
@@ -1297,6 +1401,8 @@ export default function App() {
               expenses={expenses}
               users={users}
               currentUserId={impersonatedUser ? impersonatedUser.id : currentUser.id}
+              selectedGroupId={selectedGroupId}
+              onSelectGroup={(id) => setSelectedGroupId(id)}
             />
           )}
 
@@ -1335,6 +1441,246 @@ export default function App() {
 
         </main>
       </div>
+
+      {/* HEADER INVITE ROOMMATE MODAL */}
+      {showInviteModal && selectedGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-sm font-bold text-slate-850 dark:text-slate-100 flex items-center gap-2">
+                <UserPlus className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" /> Invite Roomies / Splitters
+              </h3>
+              <button 
+                onClick={() => setShowInviteModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Simulate role-assigned email invitation links to instantly add other splitters to <strong className="text-indigo-600 dark:text-indigo-400">{selectedGroup.name}</strong>.
+            </p>
+
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              if (!formInviteEmail.trim()) return;
+              setInviteLoading(true);
+              setInviteLink('');
+              try {
+                const res = await fetch('/api/invite/send', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    groupId: selectedGroup.id,
+                    groupName: selectedGroup.name,
+                    email: formInviteEmail,
+                    role: inviteRole
+                  })
+                });
+                const data = await res.json();
+                if (res.ok && data.success) {
+                  setInviteLink(data.inviteLink);
+                  setFormInviteEmail('');
+                } else {
+                  alert(data.error || 'Failed to send invite');
+                }
+              } catch (err) {
+                console.error(err);
+              } finally {
+                setInviteLoading(false);
+              }
+            }} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={formInviteEmail}
+                  onChange={(e) => setFormInviteEmail(e.target.value)}
+                  placeholder="roommate@example.com"
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 dark:text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Assigned Group Role</label>
+                <select
+                  value={inviteRole}
+                  onChange={(e) => setInviteRole(e.target.value as 'member' | 'manager')}
+                  className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 dark:text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 animate-none"
+                >
+                  <option value="member">Group Member (Splitter)</option>
+                  <option value="manager">Billing Manager (Add / Edit Auditor)</option>
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2.5 pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowInviteModal(false)}
+                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-55 dark:hover:bg-slate-800 rounded-xl transition text-xs font-semibold bg-white dark:bg-slate-900 cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="submit"
+                  disabled={inviteLoading}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold transition disabled:opacity-50 cursor-pointer"
+                >
+                  {inviteLoading ? 'Generating Token...' : 'Generate Invite Link'}
+                </button>
+              </div>
+            </form>
+
+            {inviteLink && (
+              <div className="mt-4 p-3.5 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/30 rounded-xl space-y-2">
+                <span className="text-[10px] font-bold text-indigo-800 dark:text-indigo-400 block uppercase tracking-wider">
+                  ✉️ Invitation Link Generated!
+                </span>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-normal">
+                  You can copy the simulation link below and load it in a browser or paste it into the search tab to simulate a joining roommate accepting the role.
+                </p>
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    readOnly
+                    value={inviteLink}
+                    className="flex-1 px-2.5 py-1.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-750 rounded-lg text-[10px] font-mono text-slate-650 dark:text-slate-350 focus:outline-none"
+                  />
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(inviteLink);
+                      setInviteCopied(true);
+                      setTimeout(() => setInviteCopied(false), 2000);
+                    }}
+                    className="p-1.5 bg-slate-800 dark:bg-slate-700 text-white hover:bg-slate-900 dark:hover:bg-slate-600 rounded-lg transition cursor-pointer"
+                  >
+                    {inviteCopied ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5 text-white" />}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* HEADER REPORTS MODAL */}
+      {showReportsModal && selectedGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl relative space-y-4 animate-in fade-in zoom-in duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center pb-2 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="text-sm font-bold text-slate-850 dark:text-slate-100 flex items-center gap-2">
+                <FileSpreadsheet className="w-4.5 h-4.5 text-indigo-600 dark:text-indigo-400" /> Automated Billing Reports
+              </h3>
+              <button 
+                onClick={() => setShowReportsModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Audits group splits, categories, and itemized logs for your current billing month in <strong className="text-indigo-600 dark:text-indigo-400">{selectedGroup.name}</strong>.
+            </p>
+
+            <div className="space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="flex-1">
+                  <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide mb-1">Select Cycle</label>
+                  <select
+                    value={selectedMonth}
+                    onChange={(e) => setSelectedMonth(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 dark:text-slate-100 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="2026-06">June 2026</option>
+                    <option value="2026-05">May 2026</option>
+                    <option value="2026-04">April 2026</option>
+                  </select>
+                </div>
+
+                <div className="flex items-end self-end">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setReportLoading(true);
+                      setReportMarkdown('');
+                      try {
+                        const groupExpenses = expenses.filter(e => e.groupId === selectedGroup.id);
+                        const res = await fetch('/api/reports/monthly', {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({
+                            groupName: selectedGroup.name,
+                            expenses: groupExpenses,
+                            currency: selectedGroup.currency,
+                            month: selectedMonth
+                          })
+                        });
+                        const data = await res.json();
+                        if (res.ok && data.success) {
+                          setReportMarkdown(data.reportMarkdown);
+                        } else {
+                          alert(data.error || 'Failed to generate report');
+                        }
+                      } catch (err) {
+                        console.error(err);
+                      } finally {
+                        setReportLoading(false);
+                      }
+                    }}
+                    disabled={reportLoading}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded-xl text-xs transition disabled:opacity-50 cursor-pointer"
+                  >
+                    {reportLoading ? 'Analyzing...' : 'Generate Report'}
+                  </button>
+                </div>
+              </div>
+
+              {reportMarkdown ? (
+                <div className="border border-indigo-100 dark:border-indigo-900/30 rounded-2xl p-4 bg-indigo-50/10 dark:bg-indigo-950/5 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold text-indigo-700 dark:text-indigo-400 uppercase tracking-wider block">
+                      📊 Secure PDF / Audited Log:
+                    </span>
+                    <button 
+                      onClick={() => {
+                        const element = document.createElement("a");
+                        const file = new Blob([reportMarkdown], {type: 'text/plain'});
+                        element.href = URL.createObjectURL(file);
+                        element.download = `Splitwise_Report_${selectedGroup.name.replace(/\s+/g, '_')}.md`;
+                        document.body.appendChild(element);
+                        element.click();
+                        document.body.removeChild(element);
+                      }}
+                      className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold hover:underline cursor-pointer"
+                    >
+                      Download .md
+                    </button>
+                  </div>
+                  
+                  <div className="max-h-60 overflow-y-auto text-[11px] font-mono leading-relaxed bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-800 p-3 rounded-xl text-slate-700 dark:text-slate-350 whitespace-pre-wrap">
+                    {reportMarkdown}
+                  </div>
+                </div>
+              ) : (
+                <div className="h-32 border border-dashed border-slate-200 dark:border-slate-850 rounded-xl flex items-center justify-center text-xs text-slate-400 dark:text-slate-500">
+                  No report generated yet. Click "Generate Report" above.
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowReportsModal(false)}
+                  className="px-4 py-2 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400 hover:bg-slate-55 dark:hover:bg-slate-800 rounded-xl transition text-xs font-semibold bg-white dark:bg-slate-900 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDialog && confirmDialog.isOpen && (
         <ConfirmDialog
