@@ -27,7 +27,9 @@ import {
   Search,
   Filter,
   ArrowRight,
-  Info
+  Info,
+  Minus,
+  Maximize2
 } from 'lucide-react';
 import EditExpenseModal from './EditExpenseModal.js';
 
@@ -70,6 +72,51 @@ export default function GroupDetail({
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [ledgerView, setLedgerView] = useState<'balances' | 'simplified'>('balances');
   const [settlementFilter, setSettlementFilter] = useState<'all' | 'me'>('me');
+
+  const [minimizedCards, setMinimizedCards] = useState<{ [cardKey: string]: boolean }>(() => {
+    try {
+      const stored = localStorage.getItem(`minimizedCards_${group.id}`);
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const toggleCardMinimize = (cardKey: string) => {
+    setMinimizedCards(prev => {
+      const newVal = { ...prev, [cardKey]: !prev[cardKey] };
+      localStorage.setItem(`minimizedCards_${group.id}`, JSON.stringify(newVal));
+      return newVal;
+    });
+  };
+
+  const renderMinimizedCard = (cardKey: string, name: string, icon: React.ReactNode) => {
+    return (
+      <div 
+        onClick={() => toggleCardMinimize(cardKey)}
+        className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 px-4 rounded-xl shadow-xs flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-850 hover:border-slate-250 dark:hover:border-slate-700 transition duration-150 group"
+      >
+        <div className="flex items-center gap-2">
+          <div className="text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+            {icon}
+          </div>
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 group-hover:text-slate-950 dark:group-hover:text-white transition-colors">
+            {name}
+          </span>
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleCardMinimize(cardKey);
+          }}
+          className="p-1 rounded-md hover:bg-slate-150 dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-600 transition cursor-pointer"
+          title="Maximize card"
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  };
 
   const activeExpenses = useMemo(() => {
     return expenses.filter(e => !e.isDeleted);
@@ -559,55 +606,81 @@ export default function GroupDetail({
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 font-sans">
-      
-      {/* LEFT & CENTER COLUMN: Expense ledger list and addition forms */}
-      <div className="lg:col-span-2 space-y-8">
+    <div className="space-y-8 font-sans">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* Active group header info */}
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-          <div className="flex justify-between items-start">
-            <div>
-              <span className="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-2 py-0.5 rounded-md uppercase font-mono tracking-wider">
-                Room Workspace
-              </span>
-              <div className="flex items-center gap-2 mt-2">
-                <h2 className="text-xl font-semibold text-gray-900">{group.name}</h2>
-                {isGroupAdmin && (
+        {/* LEFT & CENTER COLUMN: Active group header info and addition forms */}
+        <div className="lg:col-span-2 space-y-8">
+          
+          {/* Active group header info */}
+          {minimizedCards['header'] ? (
+            renderMinimizedCard('header', 'Room Workspace Info', <Users className="w-4.5 h-4.5" />)
+          ) : (
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+              <div className="flex justify-between items-start">
+                <div>
+                  <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 font-bold px-2 py-0.5 rounded-md uppercase font-mono tracking-wider border border-indigo-100/50 dark:border-indigo-900/30">
+                    Room Workspace
+                  </span>
+                  <div className="flex items-center gap-2 mt-2">
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-slate-100">{group.name}</h2>
+                    {isGroupAdmin && (
+                      <button
+                        onClick={() => setIsEditingGroup(true)}
+                        className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 dark:hover:bg-slate-800 rounded transition"
+                        title="Edit group details"
+                      >
+                        <Pencil className="w-4.5 h-4.5" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-400 dark:text-slate-400 mt-1">{group.description || 'Shared expense split ledger room'}</p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="text-right">
+                    <span className="text-lg font-bold font-mono text-gray-900 dark:text-slate-100">
+                      {group.currency} {(group.totalExpense || 0).toFixed(2)}
+                    </span>
+                    <p className="text-[10px] text-gray-400 dark:text-slate-400 uppercase tracking-wider">Accumulated Balance</p>
+                  </div>
                   <button
-                    onClick={() => setIsEditingGroup(true)}
-                    className="p-1 text-slate-400 hover:text-indigo-600 hover:bg-slate-50 rounded transition"
-                    title="Edit group details"
+                    onClick={() => toggleCardMinimize('header')}
+                    className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer"
+                    title="Minimize card"
                   >
-                    <Pencil className="w-4.5 h-4.5" />
+                    <Minus className="w-4 h-4" />
                   </button>
-                )}
+                </div>
               </div>
-              <p className="text-xs text-gray-400 mt-1">{group.description || 'Shared expense split ledger room'}</p>
-            </div>
-            <div className="text-right">
-              <span className="text-lg font-bold font-mono text-gray-900">
-                {group.currency} {(group.totalExpense || 0).toFixed(2)}
-              </span>
-              <p className="text-[10px] text-gray-400 uppercase tracking-wider">Accumulated Balance</p>
-            </div>
-          </div>
 
-          <div className="border-t border-gray-50 mt-4 pt-4 flex flex-wrap gap-2 items-center text-xs text-gray-500">
-            <span className="font-semibold">Roommates:</span>
-            {groupUsers.map(gu => (
-              <span key={gu.id} className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-medium">
-                {gu.name} ({group.memberRoles[gu.id]})
-              </span>
-            ))}
-          </div>
-        </div>
+              <div className="border-t border-gray-50 dark:border-slate-800 mt-4 pt-4 flex flex-wrap gap-2 items-center text-xs text-gray-500 dark:text-slate-450">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">Roommates:</span>
+                {groupUsers.map(gu => (
+                  <span key={gu.id} className="bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 px-2 py-0.5 rounded-full font-medium">
+                    {gu.name} ({group.memberRoles[gu.id]})
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
 
         {/* LOG AN EXPENSE FORM WITH TABS */}
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-          <h3 className="text-lg font-semibold text-gray-900 tracking-tight flex items-center gap-2 mb-4">
-            <Coins className="w-5 h-5 text-gray-500" /> Log Split Transaction
-          </h3>
+        {minimizedCards['form'] ? (
+          renderMinimizedCard('form', 'Log Split Transaction Form', <Coins className="w-4.5 h-4.5" />)
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                <Coins className="w-5 h-5 text-gray-500" /> Log Split Transaction
+              </h3>
+              <button
+                onClick={() => toggleCardMinimize('form')}
+                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                title="Minimize card"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+            </div>
 
           {/* Form Tabs */}
           <div className="flex border-b border-gray-100 mb-5 text-xs font-semibold">
@@ -947,210 +1020,37 @@ export default function GroupDetail({
             </form>
             </div>
           )}
+          </div>
+        )}
         </div>
 
-        {/* ITEMIZED LOGGED EXPENSES LIST */}
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 border-b border-slate-50 pb-4">
-            <h3 className="text-lg font-semibold text-gray-900 tracking-tight">🧾 Shared Expense Log</h3>
-            {deletedExpenses.length > 0 && (
-              <label className="flex items-center gap-2 cursor-pointer text-xs select-none bg-slate-100/70 hover:bg-slate-100 px-3 py-1.5 rounded-full font-medium text-slate-650 transition-colors">
-                <input
-                  type="checkbox"
-                  checked={showDeleted}
-                  onChange={(e) => setShowDeleted(e.target.checked)}
-                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
-                />
-                <span>Include Deleted ({deletedExpenses.length} for Audit Trail)</span>
-              </label>
-            )}
-          </div>
-          
-          {/* SEARCH & CATEGORY FILTERS */}
-          <div className="space-y-3.5 mb-6 bg-slate-50/50 dark:bg-slate-900/20 p-4 rounded-2xl border border-slate-100/80 dark:border-slate-800/40">
-            <div className="relative">
-              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <Search className="h-4 w-4 text-gray-400 dark:text-slate-500" />
-              </span>
-              <input
-                type="text"
-                placeholder="Search description, items, or payers..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="block w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 text-xs placeholder-gray-400 dark:placeholder-slate-500 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-              />
-            </div>
 
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
-                <Filter className="w-3 h-3 text-indigo-500" /> Categories Filter (Multiselect)
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => setSelectedCategories([])}
-                  className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer select-none border ${
-                    selectedCategories.length === 0
-                      ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm'
-                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/50 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700'
-                  }`}
-                >
-                  All
-                </button>
-                {categories.map(cat => {
-                  const isSelected = selectedCategories.includes(cat);
-                  return (
-                    <button
-                      type="button"
-                      key={cat}
-                      onClick={() => {
-                        if (isSelected) {
-                          setSelectedCategories(selectedCategories.filter(c => c !== cat));
-                        } else {
-                          setSelectedCategories([...selectedCategories, cat]);
-                        }
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer select-none border ${
-                        isSelected
-                          ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm'
-                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/50 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-          
-          {displayedExpenses.length === 0 ? (
-            <p className="text-xs text-gray-400 py-6 text-center">
-              {showDeleted ? "No transactions logged in this group yet." : "No active transactions logged. Check \"Include Deleted\" for audit logs if any exist."}
-            </p>
-          ) : filteredExpenses.length === 0 ? (
-            <div className="p-8 text-center text-xs text-slate-400 font-medium bg-slate-50 rounded-2xl flex flex-col items-center justify-center gap-1.5 border border-dashed border-slate-150">
-              <Info className="w-5 h-5 text-slate-300" />
-              No transactions match your search query or category filter.
-            </div>
-          ) : (
-            <div className="divide-y divide-gray-50">
-              {filteredExpenses.map((exp) => {
-                const payingUser = users.find(u => u.id === exp.paidBy);
-                const creatorUser = users.find(u => u.id === (exp.createdBy || exp.paidBy));
-                const isDeleted = !!exp.isDeleted;
-                const showDelete = !isDeleted && (currentUserRole === 'admin' || currentUserRole === 'manager' || exp.paidBy === currentUserId);
-
-                return (
-                  <div 
-                    key={exp.id} 
-                    className={`py-4 flex justify-between items-center text-xs group transition-all duration-150 ${
-                      isDeleted ? 'bg-rose-50/45 border-l-4 border-rose-500 px-3 my-1.5 rounded-xl opacity-85' : ''
-                    }`}
-                  >
-                    <div className="space-y-1">
-                      <h4 className={`font-semibold ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-800 dark:text-slate-200'}`}>
-                        {exp.description}
-                      </h4>
-                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
-                        <span className={`px-1.5 py-0.5 rounded uppercase font-bold tracking-wide font-mono text-[9px] ${
-                          isDeleted ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-600'
-                        }`}>
-                          {exp.category}
-                        </span>
-                        <span>• Paid by <strong>{payingUser?.name || 'Unknown'}</strong></span>
-                        <span>• Created by <strong>{creatorUser?.name || 'System'}</strong></span>
-                        <span>• {exp.date}</span>
-                        {isDeleted && (
-                          <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider bg-rose-100/50 px-2 py-0.5 rounded-full">
-                            Deleted (Audit trail preserved)
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Display sub-items if present */}
-                      {exp.items && exp.items.length > 0 && (
-                        <div className={`mt-1.5 p-2 rounded-lg space-y-1 text-[10px] ${
-                          isDeleted ? 'bg-rose-100/20' : 'bg-gray-50/50'
-                        }`}>
-                          <span className={`font-semibold block uppercase tracking-wider text-[8px] ${
-                            isDeleted ? 'text-rose-500' : 'text-gray-500'
-                          }`}>
-                            Itemized breakdown:
-                          </span>
-                          {exp.items.map((it, idx) => (
-                            <div key={idx} className={`flex justify-between ${isDeleted ? 'text-rose-700/70 line-through' : 'text-gray-500'}`}>
-                              <span>- {it.description}</span>
-                              <span className="font-mono">{group.currency} {it.amount.toFixed(2)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <span className={`font-bold font-mono ${isDeleted ? 'text-rose-800 line-through' : 'text-gray-900'}`}>
-                          {exp.currency} {Number(exp.amount).toFixed(2)}
-                        </span>
-                        <p className="text-[9px] text-gray-400 font-medium uppercase mt-0.5">
-                          {exp.splitMethod === 'equal' ? 'Split Equally' : exp.splitMethod === 'exact' ? 'Exact Allocation' : 'Proportional Shares'}
-                        </p>
-                      </div>
-
-                      {!isDeleted && showDelete && onUpdateExpense && (
-                        <button
-                          type="button"
-                          onClick={() => setEditingExpense(exp)}
-                          title="Modify transaction details"
-                          className="text-gray-400 hover:text-indigo-650 transition opacity-0 group-hover:opacity-100 mr-1 cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      )}
-                      {!isDeleted && showDelete && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfirmDialog({
-                              isOpen: true,
-                              title: 'Delete Expense',
-                              message: `Are you sure you want to delete this expense of ${exp.currency} ${Number(exp.amount).toFixed(2)} for "${exp.description}"? This will move it to the audit log trail and adjust group total calculations.`,
-                              type: 'danger',
-                              onConfirm: () => {
-                                setConfirmDialog(null);
-                                onDeleteExpense(exp.id, exp.amount);
-                              }
-                            });
-                          }}
-                          className="text-gray-400 hover:text-red-500 transition opacity-0 group-hover:opacity-100 cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-      </div>
 
       {/* RIGHT COLUMN: Invitations & Automated Monthly Reports */}
       <div className="space-y-8">
         
         {/* ROOMMATES & BALANCES LIST */}
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-semibold text-gray-900 tracking-tight flex items-center gap-2">
-              <Users className="w-4.5 h-4.5 text-gray-500" /> Roommates Ledger
-            </h3>
-            <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-mono font-bold">
-              {groupUsers.length} members
-            </span>
-          </div>
+        {minimizedCards['ledger'] ? (
+          renderMinimizedCard('ledger', 'Roommates Ledger & Dues', <Users className="w-4.5 h-4.5" />)
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                <Users className="w-4.5 h-4.5 text-gray-500" /> Roommates Ledger
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] bg-slate-100 dark:bg-slate-850 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded font-mono font-bold">
+                  {groupUsers.length} members
+                </span>
+                <button
+                  onClick={() => toggleCardMinimize('ledger')}
+                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                  title="Minimize card"
+                >
+                  <Minus className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
 
           {/* TABS SELECTOR FOR BALANCES VS SIMPLIFIED */}
           <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-semibold select-none border border-slate-200/40">
@@ -1418,12 +1318,25 @@ export default function GroupDetail({
             </div>
           )}
         </div>
+      )}
 
         {/* INVITE NEW MEMBERS VIA SECURE EMAIL LINK */}
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900 tracking-tight flex items-center gap-2 mb-1.5">
-            <UserPlus className="w-4.5 h-4.5 text-gray-500" /> Invite Roomies / Splitters
-          </h3>
+        {minimizedCards['invite'] ? (
+          renderMinimizedCard('invite', 'Roommate Invitation Form', <UserPlus className="w-4.5 h-4.5" />)
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+            <div className="flex justify-between items-center mb-1.5">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                <UserPlus className="w-4.5 h-4.5 text-gray-500" /> Invite Roomies / Splitters
+              </h3>
+              <button
+                onClick={() => toggleCardMinimize('invite')}
+                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                title="Minimize card"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+            </div>
           <p className="text-xs text-gray-400 mb-4">
             Simulate role-assigned email invitation links to instantly add other splitters.
           </p>
@@ -1486,13 +1399,26 @@ export default function GroupDetail({
               </div>
             </div>
           )}
-        </div>
+          </div>
+        )}
 
         {/* AUTOMATED MONTHLY REPORTS MODULE */}
-        <div className="bg-white border border-gray-100 p-6 rounded-2xl shadow-sm">
-          <h3 className="text-sm font-semibold text-gray-900 tracking-tight flex items-center gap-2 mb-1.5">
-            <FileSpreadsheet className="w-4.5 h-4.5 text-gray-500" /> Automated Billing Reports
-          </h3>
+        {minimizedCards['report'] ? (
+          renderMinimizedCard('report', 'Automated Billing Reports Tool', <FileSpreadsheet className="w-4.5 h-4.5" />)
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+            <div className="flex justify-between items-center mb-1.5">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                <FileSpreadsheet className="w-4.5 h-4.5 text-gray-500" /> Automated Billing Reports
+              </h3>
+              <button
+                onClick={() => toggleCardMinimize('report')}
+                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                title="Minimize card"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+            </div>
           <p className="text-xs text-gray-400 mb-4">
             Audits group splits, categories, and itemized logs for your current billing month.
           </p>
@@ -1553,8 +1479,211 @@ export default function GroupDetail({
             )}
           </div>
         </div>
+      )}
+      </div>
 
       </div>
+
+      {/* FULL-WIDTH ITEMIZED LOGGED EXPENSES LIST */}
+      {minimizedCards['log'] ? (
+        renderMinimizedCard('log', 'Shared Expense Log Ledger', <Receipt className="w-4.5 h-4.5" />)
+      ) : (
+        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 border-b border-slate-50 dark:border-slate-800 pb-4">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
+                <Receipt className="w-5 h-5 text-indigo-600 dark:text-indigo-400" /> Shared Expense Log
+              </h3>
+              <button
+                onClick={() => toggleCardMinimize('log')}
+                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                title="Minimize card"
+              >
+                <Minus className="w-4 h-4" />
+              </button>
+            </div>
+            {deletedExpenses.length > 0 && (
+              <label className="flex items-center gap-2 cursor-pointer text-xs select-none bg-slate-100/70 hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-750 px-3 py-1.5 rounded-full font-medium text-slate-650 dark:text-slate-300 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={showDeleted}
+                  onChange={(e) => setShowDeleted(e.target.checked)}
+                  className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                />
+                <span>Include Deleted ({deletedExpenses.length} for Audit Trail)</span>
+              </label>
+            )}
+          </div>
+          
+          {/* SEARCH & CATEGORY FILTERS */}
+          <div className="space-y-3.5 mb-6 bg-slate-50/50 dark:bg-slate-950 p-4 rounded-2xl border border-slate-100/80 dark:border-slate-800/40">
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                <Search className="h-4 w-4 text-gray-400 dark:text-slate-500" />
+              </span>
+              <input
+                type="text"
+                placeholder="Search description, items, or payers..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="block w-full pl-9 pr-3 py-2 border border-slate-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-900 text-xs placeholder-gray-400 dark:placeholder-slate-500 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
+                <Filter className="w-3 h-3 text-indigo-500" /> Categories Filter (Multiselect)
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategories([])}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer select-none border ${
+                    selectedCategories.length === 0
+                      ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm'
+                      : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/50 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  All
+                </button>
+                {categories.map(cat => {
+                  const isSelected = selectedCategories.includes(cat);
+                  return (
+                    <button
+                      type="button"
+                      key={cat}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedCategories(selectedCategories.filter(c => c !== cat));
+                        } else {
+                          setSelectedCategories([...selectedCategories, cat]);
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold transition cursor-pointer select-none border ${
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-600 dark:bg-indigo-500 dark:border-indigo-500 text-white shadow-sm'
+                          : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200/50 dark:border-slate-700/50 hover:bg-slate-200 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+          
+          {displayedExpenses.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">
+              {showDeleted ? "No transactions logged in this group yet." : "No active transactions logged. Check \"Include Deleted\" for audit logs if any exist."}
+            </p>
+          ) : filteredExpenses.length === 0 ? (
+            <div className="p-8 text-center text-xs text-slate-400 font-medium bg-slate-50 dark:bg-slate-900/40 rounded-2xl flex flex-col items-center justify-center gap-1.5 border border-dashed border-slate-150 dark:border-slate-800">
+              <Info className="w-5 h-5 text-slate-300 dark:text-slate-650" /> No transactions match your search query or category filter.
+            </div>
+          ) : (
+            <div className="divide-y divide-gray-100 dark:divide-slate-800">
+              {filteredExpenses.map((exp) => {
+                const payingUser = users.find(u => u.id === exp.paidBy);
+                const creatorUser = users.find(u => u.id === (exp.createdBy || exp.paidBy));
+                const isDeleted = !!exp.isDeleted;
+                const showDelete = !isDeleted && (currentUserRole === 'admin' || currentUserRole === 'manager' || exp.paidBy === currentUserId);
+
+                return (
+                  <div 
+                    key={exp.id} 
+                    className={`py-4 flex justify-between items-center text-xs group transition-all duration-150 ${
+                      isDeleted ? 'bg-rose-50/45 dark:bg-rose-950/10 border-l-4 border-rose-500 px-3 my-1.5 rounded-xl opacity-85' : ''
+                    }`}
+                  >
+                    <div className="space-y-1">
+                      <h4 className={`font-semibold ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-800 dark:text-slate-200'}`}>
+                        {exp.description}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
+                        <span className={`px-1.5 py-0.5 rounded uppercase font-bold tracking-wide font-mono text-[9px] ${
+                          isDeleted ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400' : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-350'
+                        }`}>
+                          {exp.category}
+                        </span>
+                        <span>• Paid by <strong>{payingUser?.name || 'Unknown'}</strong></span>
+                        <span>• Created by <strong>{creatorUser?.name || 'System'}</strong></span>
+                        <span>• {exp.date}</span>
+                        {isDeleted && (
+                          <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider bg-rose-100/50 dark:bg-rose-950/55 px-2 py-0.5 rounded-full">
+                            Deleted (Audit trail preserved)
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Display sub-items if present */}
+                      {exp.items && exp.items.length > 0 && (
+                        <div className={`mt-1.5 p-2 rounded-lg space-y-1 text-[10px] ${
+                          isDeleted ? 'bg-rose-100/20 dark:bg-rose-950/20' : 'bg-gray-50/50 dark:bg-slate-900/60'
+                        }`}>
+                          <span className={`font-semibold block uppercase tracking-wider text-[8px] ${
+                            isDeleted ? 'text-rose-500' : 'text-gray-500'
+                          }`}>
+                            Itemized breakdown:
+                          </span>
+                          {exp.items.map((it, idx) => (
+                            <div key={idx} className={`flex justify-between ${isDeleted ? 'text-rose-700/70 dark:text-rose-400 line-through' : 'text-gray-500 dark:text-slate-400'}`}>
+                              <span>- {it.description}</span>
+                              <span className="font-mono">{group.currency} {it.amount.toFixed(2)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <span className={`font-bold font-mono ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
+                          {exp.currency} {Number(exp.amount).toFixed(2)}
+                        </span>
+                        <p className="text-[9px] text-gray-400 font-medium uppercase mt-0.5">
+                          {exp.splitMethod === 'equal' ? 'Split Equally' : exp.splitMethod === 'exact' ? 'Exact Allocation' : 'Proportional Shares'}
+                        </p>
+                      </div>
+
+                      {!isDeleted && showDelete && onUpdateExpense && (
+                        <button
+                          type="button"
+                          onClick={() => setEditingExpense(exp)}
+                          title="Modify transaction details"
+                          className="text-gray-400 hover:text-indigo-650 transition opacity-0 group-hover:opacity-100 mr-1 cursor-pointer"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
+                      {!isDeleted && showDelete && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfirmDialog({
+                              isOpen: true,
+                              title: 'Delete Expense',
+                              message: `Are you sure you want to delete this expense of ${exp.currency} ${Number(exp.amount).toFixed(2)} for "${exp.description}"? This will move it to the audit log trail and adjust group total calculations.`,
+                              type: 'danger',
+                              onConfirm: () => {
+                                setConfirmDialog(null);
+                                onDeleteExpense(exp.id, exp.amount);
+                              }
+                            });
+                          }}
+                          className="text-gray-400 hover:text-red-500 transition opacity-0 group-hover:opacity-100 cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {editingExpense && (
         <EditExpenseModal

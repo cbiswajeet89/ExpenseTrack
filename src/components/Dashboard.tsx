@@ -37,7 +37,11 @@ import {
   Search,
   ArrowUpDown,
   ArrowUp,
-  ArrowDown
+  ArrowDown,
+  ChevronDown,
+  ChevronUp,
+  Minus,
+  Maximize2
 } from 'lucide-react';
 import { getExpensesForGroup } from '../lib/dbHelper.js';
 import EditExpenseModal from './EditExpenseModal.js';
@@ -73,6 +77,60 @@ export default function Dashboard({
 
   // Selected Group state for Dashboard scoping
   const [activeGroupId, setActiveGroupId] = useState<string>('');
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(() => localStorage.getItem('isDashboardToolbarCollapsed') === 'true');
+
+  const [minimizedCards, setMinimizedCards] = useState<{ [cardKey: string]: boolean }>(() => {
+    try {
+      const stored = localStorage.getItem('dashboardMinimizedCards');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const toggleCardMinimize = (cardKey: string) => {
+    setMinimizedCards(prev => {
+      const newVal = { ...prev, [cardKey]: !prev[cardKey] };
+      localStorage.setItem('dashboardMinimizedCards', JSON.stringify(newVal));
+      return newVal;
+    });
+  };
+
+  const renderMinimizedCard = (cardKey: string, name: string, icon: React.ReactNode) => {
+    return (
+      <div 
+        onClick={() => toggleCardMinimize(cardKey)}
+        className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 px-4 rounded-xl shadow-xs flex items-center justify-between cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-850 hover:border-slate-250 dark:hover:border-slate-700 transition duration-150 group self-start w-full"
+      >
+        <div className="flex items-center gap-2">
+          <div className="text-slate-500 dark:text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors">
+            {icon}
+          </div>
+          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 group-hover:text-slate-950 dark:group-hover:text-white transition-colors">
+            {name}
+          </span>
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleCardMinimize(cardKey);
+          }}
+          className="p-1 rounded-md hover:bg-slate-150 dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-600 transition cursor-pointer"
+          title="Maximize card"
+        >
+          <Maximize2 className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    );
+  };
+
+  const toggleToolbarCollapse = () => {
+    setIsToolbarCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('isDashboardToolbarCollapsed', String(next));
+      return next;
+    });
+  };
   const [settlementFilter, setSettlementFilter] = useState<'all' | 'me'>('me');
   const [dashboardExpenses, setDashboardExpenses] = useState<Expense[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
@@ -432,274 +490,384 @@ export default function Dashboard({
   return (
     <div className="space-y-6 font-sans">
       {/* TOOLBAR CONTROLS */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-4 rounded-2xl">
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Select Shared Room:</span>
-          <select
-            value={activeGroupId}
-            onChange={(e) => setActiveGroupId(e.target.value)}
-            className="px-3 py-1.5 border border-slate-250 dark:border-slate-700 bg-white dark:bg-slate-850 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-          >
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Coins className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
-          <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Convert Workspace to:</span>
-          <div className="flex bg-slate-200/50 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-150 dark:border-slate-750 gap-0.5">
-            {Object.keys(currencyRates).map((currCode) => (
-              <button
-                key={currCode}
-                onClick={() => handleCurrencyChange(currCode)}
-                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg uppercase transition cursor-pointer ${
-                  selectedCurrency === currCode
-                    ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs border border-indigo-100/50 dark:border-indigo-900/30'
-                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                }`}
-              >
-                {currCode}
-              </button>
-            ))}
+      {isToolbarCollapsed ? (
+        <div className="flex items-center justify-between gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-850 px-4 py-3 rounded-2xl transition-all duration-350">
+          <div className="flex items-center gap-3">
+            <Filter className="w-4 h-4 text-indigo-500 shrink-0" />
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Active Room:</span>
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-150 dark:border-slate-750 shadow-2xs">
+                {activeGroup?.name || 'No Active Room'}
+              </span>
+              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider ml-1">Dashboard Currency:</span>
+              <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-150 dark:border-slate-750 shadow-2xs flex items-center gap-1">
+                <Coins className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                {selectedCurrency}
+              </span>
+            </div>
           </div>
+          <button
+            onClick={toggleToolbarCollapse}
+            className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-indigo-650 dark:text-indigo-400 hover:text-white hover:bg-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 rounded-lg transition-all cursor-pointer"
+            title="Expand filter toolbar"
+          >
+            <span>Expand Toolbar</span>
+            <ChevronDown className="w-3.5 h-3.5" />
+          </button>
         </div>
-      </div>
+      ) : (
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-4 rounded-2xl relative transition-all duration-350">
+          <div className="flex flex-col md:flex-row md:items-center gap-4 w-full md:w-auto">
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-slate-500 dark:text-slate-400" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Select Shared Room:</span>
+              <select
+                value={activeGroupId}
+                onChange={(e) => setActiveGroupId(e.target.value)}
+                className="px-3 py-1.5 border border-slate-250 dark:border-slate-700 bg-white dark:bg-slate-850 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              >
+                {groups.map((g) => (
+                  <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Coins className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Convert Workspace to:</span>
+              <div className="flex bg-slate-200/50 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-150 dark:border-slate-750 gap-0.5">
+                {Object.keys(currencyRates).map((currCode) => (
+                  <button
+                    key={currCode}
+                    onClick={() => handleCurrencyChange(currCode)}
+                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg uppercase transition cursor-pointer ${
+                      selectedCurrency === currCode
+                        ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs border border-indigo-100/50 dark:border-indigo-900/30'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {currCode}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <button
+            onClick={toggleToolbarCollapse}
+            className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-slate-500 hover:text-white hover:bg-slate-650 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 rounded-lg transition-all self-end md:self-auto cursor-pointer"
+            title="Collapse toolbar"
+          >
+            <span>Collapse</span>
+            <ChevronUp className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight">Total Balance</p>
-            <h3 className={`text-2xl font-extrabold ${personalBalance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
+            <h3 className={`text-xl font-extrabold ${personalBalance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-500 dark:text-rose-400'}`}>
               {personalBalance >= 0 ? '+' : ''}{currencySymbols[selectedCurrency] || selectedCurrency}{personalBalance.toFixed(2)}
             </h3>
           </div>
-          <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${personalBalance >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500 dark:text-emerald-450' : 'bg-rose-50 dark:bg-rose-950/20 text-rose-500 dark:text-rose-450'}`}>
-            <ArrowUpRight className="w-6 h-6" />
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${personalBalance >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500 dark:text-emerald-450' : 'bg-rose-50 dark:bg-rose-950/20 text-rose-500 dark:text-rose-450'}`}>
+            <ArrowUpRight className="w-5 h-5" />
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight">You are owed</p>
-            <h3 className="text-2xl font-extrabold text-slate-800 dark:text-slate-100">{currencySymbols[selectedCurrency] || selectedCurrency}{youAreOwed.toFixed(2)}</h3>
+            <h3 className="text-xl font-extrabold text-slate-800 dark:text-slate-100">{currencySymbols[selectedCurrency] || selectedCurrency}{youAreOwed.toFixed(2)}</h3>
           </div>
-          <div className="w-12 h-12 bg-blue-50 dark:bg-blue-950/20 rounded-full flex items-center justify-center text-blue-500 dark:text-blue-400 shrink-0">
-            <TrendingUp className="w-6 h-6" />
+          <div className="w-10 h-10 bg-blue-50 dark:bg-blue-950/20 rounded-full flex items-center justify-center text-blue-500 dark:text-blue-400 shrink-0">
+            <TrendingUp className="w-5 h-5" />
           </div>
         </div>
 
-        <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
+        <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">
           <div className="space-y-1">
             <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase font-bold tracking-tight">You owe</p>
-            <h3 className="text-2xl font-extrabold text-rose-500 dark:text-rose-400">{currencySymbols[selectedCurrency] || selectedCurrency}{youOwe.toFixed(2)}</h3>
+            <h3 className="text-xl font-extrabold text-rose-500 dark:text-rose-400">{currencySymbols[selectedCurrency] || selectedCurrency}{youOwe.toFixed(2)}</h3>
           </div>
-          <div className="w-12 h-12 bg-rose-50 dark:bg-rose-950/20 rounded-full flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
-            <ArrowDownRight className="w-6 h-6" />
+          <div className="w-10 h-10 bg-rose-50 dark:bg-rose-950/20 rounded-full flex items-center justify-center text-rose-500 dark:text-rose-400 shrink-0">
+            <ArrowDownRight className="w-5 h-5" />
           </div>
         </div>
       </div>
 
       {/* Settlements & Individual Balances Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
-              🤝 Optimized Settlement Matrix
-            </h3>
-            <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-full font-mono">
-              Greedy Routing
-            </span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
-            Minimized debt clearance matrix calculated in **{selectedCurrency}** to solve all group splits.
-          </p>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+        {minimizedCards['settlements'] ? (
+          renderMinimizedCard('settlements', 'Optimized Settlement Matrix', <CheckCircle2 className="w-4.5 h-4.5 text-indigo-500" />)
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-4 sm:p-5 rounded-2xl shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                  🤝 Optimized Settlement Matrix
+                </h3>
+                <button
+                  onClick={() => toggleCardMinimize('settlements')}
+                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                  title="Minimize card"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <span className="text-[10px] uppercase font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-full font-mono">
+                Greedy Routing
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+              Minimized debt clearance matrix calculated in **{selectedCurrency}** to solve all group splits.
+            </p>
 
-          {/* Settlement Sub-Filter Tabs */}
-          <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-semibold select-none border border-slate-200/40 dark:border-slate-700 mb-4">
-            <button
-              type="button"
-              onClick={() => setSettlementFilter('me')}
-              className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
-                settlementFilter === 'me'
-                  ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-white shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              My Dues Only
-            </button>
-            <button
-              type="button"
-              onClick={() => setSettlementFilter('all')}
-              className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
-                settlementFilter === 'all'
-                  ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-white shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              All Roommate Dues
-            </button>
-          </div>
+            {/* Settlement Sub-Filter Tabs */}
+            <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl text-[11px] font-semibold select-none border border-slate-200/40 dark:border-slate-700 mb-4">
+              <button
+                type="button"
+                onClick={() => setSettlementFilter('me')}
+                className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
+                  settlementFilter === 'me'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                My Dues Only
+              </button>
+              <button
+                type="button"
+                onClick={() => setSettlementFilter('all')}
+                className={`flex-1 py-1 rounded-lg text-center transition cursor-pointer ${
+                  settlementFilter === 'all'
+                    ? 'bg-white dark:bg-slate-700 text-indigo-650 dark:text-white shadow-xs'
+                    : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                All Roommate Dues
+              </button>
+            </div>
 
-          {(() => {
-            const displayedSettlements = settlementFilter === 'me'
-              ? balanceResolution.settlements.filter(s => s.fromId === currentUserId || s.toId === currentUserId)
-              : balanceResolution.settlements;
+            {(() => {
+              const displayedSettlements = settlementFilter === 'me'
+                ? balanceResolution.settlements.filter(s => s.fromId === currentUserId || s.toId === currentUserId)
+                : balanceResolution.settlements;
 
-            if (displayedSettlements.length === 0) {
+              if (displayedSettlements.length === 0) {
+                return (
+                  <div className="flex flex-col items-center justify-center py-10 bg-gray-50 dark:bg-slate-850/50 rounded-2xl border border-dashed border-gray-200 dark:border-slate-800">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-500 dark:text-emerald-400 mb-2" />
+                    <p className="text-xs font-medium text-gray-600 dark:text-slate-300">
+                      {settlementFilter === 'me' ? 'No personal dues left!' : 'Perfect Equilibrium!'}
+                    </p>
+                    <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1 text-center">
+                      {settlementFilter === 'me' 
+                        ? 'You are completely settled with all roommates in this group.' 
+                        : 'All roommates are completely settled.'}
+                    </p>
+                  </div>
+                );
+              }
+
               return (
-                <div className="flex flex-col items-center justify-center py-10 bg-gray-50 dark:bg-slate-850/50 rounded-2xl border border-dashed border-gray-200 dark:border-slate-800">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-500 dark:text-emerald-400 mb-2" />
-                  <p className="text-xs font-medium text-gray-600 dark:text-slate-300">
-                    {settlementFilter === 'me' ? 'No personal dues left!' : 'Perfect Equilibrium!'}
-                  </p>
-                  <p className="text-[10px] text-gray-400 dark:text-slate-500 mt-1 text-center">
-                    {settlementFilter === 'me' 
-                      ? 'You are completely settled with all roommates in this group.' 
-                      : 'All roommates are completely settled.'}
-                  </p>
+                <div className="space-y-3">
+                  {displayedSettlements.map((settle, i) => (
+                    <div 
+                      key={i} 
+                      className={`flex items-center justify-between p-3.5 border rounded-xl text-xs transition ${
+                        settle.fromId === currentUserId 
+                          ? 'border-red-100 dark:border-red-950/25 bg-red-50/20 dark:bg-red-950/10' 
+                          : settle.toId === currentUserId 
+                          ? 'border-emerald-100 dark:border-emerald-950/25 bg-emerald-50/20 dark:bg-emerald-950/10' 
+                          : 'border-gray-100 dark:border-slate-800 bg-gray-50/30 dark:bg-slate-850/20'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        {settle.fromId === currentUserId ? (
+                          <span className="font-semibold text-red-650 dark:text-red-400">You</span>
+                        ) : (
+                          <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.fromName}</span>
+                        )}
+                        <span className="text-gray-400 dark:text-slate-500">pays</span>
+                        {settle.toId === currentUserId ? (
+                          <span className="font-semibold text-emerald-650 dark:text-emerald-400">You</span>
+                        ) : (
+                          <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.toName}</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 font-mono">
+                        <span className={`font-semibold ${settle.fromId === currentUserId ? 'text-red-600 dark:text-red-400' : settle.toId === currentUserId ? 'text-emerald-650 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>
+                          {currencySymbols[selectedCurrency] || selectedCurrency}{settle.amountSelected.toFixed(2)}
+                        </span>
+                        <span className="text-[10px] text-gray-400 dark:text-slate-500 uppercase">{selectedCurrency}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               );
-            }
-
-            return (
-              <div className="space-y-3">
-                {displayedSettlements.map((settle, i) => (
-                  <div 
-                    key={i} 
-                    className={`flex items-center justify-between p-3.5 border rounded-xl text-xs transition ${
-                      settle.fromId === currentUserId 
-                        ? 'border-red-100 dark:border-red-950/25 bg-red-50/20 dark:bg-red-950/10' 
-                        : settle.toId === currentUserId 
-                        ? 'border-emerald-100 dark:border-emerald-950/25 bg-emerald-50/20 dark:bg-emerald-950/10' 
-                        : 'border-gray-100 dark:border-slate-800 bg-gray-50/30 dark:bg-slate-850/20'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5">
-                      {settle.fromId === currentUserId ? (
-                        <span className="font-semibold text-red-650 dark:text-red-400">You</span>
-                      ) : (
-                        <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.fromName}</span>
-                      )}
-                      <span className="text-gray-400 dark:text-slate-500">pays</span>
-                      {settle.toId === currentUserId ? (
-                        <span className="font-semibold text-emerald-650 dark:text-emerald-400">You</span>
-                      ) : (
-                        <span className="font-semibold text-gray-800 dark:text-slate-200">{settle.toName}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-1.5 font-mono">
-                      <span className={`font-semibold ${settle.fromId === currentUserId ? 'text-red-600 dark:text-red-400' : settle.toId === currentUserId ? 'text-emerald-650 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>
-                        {currencySymbols[selectedCurrency] || selectedCurrency}{settle.amountSelected.toFixed(2)}
-                      </span>
-                      <span className="text-[10px] text-gray-400 dark:text-slate-500 uppercase">{selectedCurrency}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            );
-          })()}
-        </div>
+            })()}
+          </div>
+        )}
 
         {/* Ledger Breakdown by User */}
-        <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
-          <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight mb-2">👥 Splitwise Board Member Status</h3>
-          <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">
-            Individual roommate balances calculated in **{selectedCurrency}**. Positive represents money owed to them.
-          </p>
+        {minimizedCards['balances'] ? (
+          renderMinimizedCard('balances', 'Splitwise Board Member Status', <TrendingUp className="w-4.5 h-4.5 text-indigo-500" />)
+        ) : (
+          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-4 sm:p-5 rounded-2xl shadow-sm">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                👥 Splitwise Board Member Status
+              </h3>
+              <button
+                onClick={() => toggleCardMinimize('balances')}
+                className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                title="Minimize card"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">
+              Individual roommate balances calculated in **{selectedCurrency}**. Positive represents money owed to them.
+            </p>
 
-          <div className="space-y-4">
-            {activeGroup?.members.map((memberId) => {
-              const user = userMap.get(memberId);
-              if (!user) return null;
-              const bal = balanceResolution.balances[user.id] || 0;
-              return (
-                <div key={user.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-slate-800 flex items-center justify-center font-bold text-gray-650 dark:text-slate-300 text-xs uppercase">
-                      {user.name.substr(0, 2)}
+            <div className="space-y-4">
+              {activeGroup?.members.map((memberId) => {
+                const user = userMap.get(memberId);
+                if (!user) return null;
+                const bal = balanceResolution.balances[user.id] || 0;
+                return (
+                  <div key={user.id} className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-gray-100 dark:bg-slate-800 flex items-center justify-center font-bold text-gray-650 dark:text-slate-300 text-xs uppercase">
+                        {user.name.substr(0, 2)}
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-semibold text-gray-850 dark:text-slate-200">{user.name} {user.id === currentUserId && '(You)'}</h4>
+                        <p className="text-[10px] text-gray-400 dark:text-slate-500 uppercase font-mono tracking-wider">{user.role}</p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="text-xs font-semibold text-gray-850 dark:text-slate-200">{user.name} {user.id === currentUserId && '(You)'}</h4>
-                      <p className="text-[10px] text-gray-400 dark:text-slate-500 uppercase font-mono tracking-wider">{user.role}</p>
-                    </div>
+                    <span className={`text-xs font-mono font-semibold ${bal > 0 ? 'text-emerald-600 dark:text-emerald-400' : bal < 0 ? 'text-rose-500 dark:text-rose-400' : 'text-gray-400 dark:text-slate-500'}`}>
+                      {bal > 0 ? '+' : ''}{currencySymbols[selectedCurrency] || selectedCurrency}{bal.toFixed(2)} {selectedCurrency}
+                    </span>
                   </div>
-                  <span className={`text-xs font-mono font-semibold ${bal > 0 ? 'text-emerald-600 dark:text-emerald-400' : bal < 0 ? 'text-rose-500 dark:text-rose-400' : 'text-gray-400 dark:text-slate-500'}`}>
-                    {bal > 0 ? '+' : ''}{currencySymbols[selectedCurrency] || selectedCurrency}{bal.toFixed(2)} {selectedCurrency}
-                  </span>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Analytics charts */}
       {activeExpenses.length > 0 && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight mb-1">🍕 Allocation by Category ({selectedCurrency})</h3>
-            <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">Consolidated expenditures dynamically converted on-the-fly.</p>
-            <div className="h-64">
-              {categoryData.length === 0 ? (
-                <p className="text-xs text-gray-400 dark:text-slate-500 flex items-center justify-center h-full">No category data recorded.</p>
-              ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-6">
+          {minimizedCards['category_chart'] ? (
+            renderMinimizedCard('category_chart', 'Category Allocation Analytics', <TrendingUp className="w-4.5 h-4.5 text-indigo-500" />)
+          ) : (
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-4 sm:p-5 rounded-2xl shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                  🍕 Allocation by Category ({selectedCurrency})
+                </h3>
+                <button
+                  onClick={() => toggleCardMinimize('category_chart')}
+                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                  title="Minimize card"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">Consolidated expenditures dynamically converted on-the-fly.</p>
+              <div className="h-64">
+                {categoryData.length === 0 ? (
+                  <p className="text-xs text-gray-400 dark:text-slate-500 flex items-center justify-center h-full">No category data recorded.</p>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={categoryData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {categoryData.map((entry, idx) => (
+                          <Cell key={`cell-${idx}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: 'var(--tooltip-bg, #fff)', borderColor: 'var(--tooltip-border, #e5e7eb)', borderRadius: '12px', fontSize: '11px', color: 'var(--tooltip-text, #1e293b)' }}
+                        formatter={(value) => [`${currencySymbols[selectedCurrency] || selectedCurrency}${value}`, 'Amount']} 
+                      />
+                      <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+          )}
+
+          {minimizedCards['trend_chart'] ? (
+            renderMinimizedCard('trend_chart', 'Monthly Spending Velocity Analytics', <TrendingUp className="w-4.5 h-4.5 text-indigo-500" />)
+          ) : (
+            <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-4 sm:p-5 rounded-2xl shadow-sm">
+              <div className="flex items-center justify-between mb-1">
+                <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight flex items-center gap-2">
+                  📈 Monthly Spending Velocity ({selectedCurrency})
+                </h3>
+                <button
+                  onClick={() => toggleCardMinimize('trend_chart')}
+                  className="p-1 rounded-md hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                  title="Minimize card"
+                >
+                  <Minus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-slate-400 mb-4">A real-time visual tracking of shared pool volume.</p>
+              <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={categoryData}
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={60}
-                      outerRadius={80}
-                      paddingAngle={4}
-                      dataKey="value"
-                    >
-                      {categoryData.map((entry, idx) => (
-                        <Cell key={`cell-${idx}`} fill={entry.color} />
-                      ))}
-                    </Pie>
+                  <BarChart data={trendData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--stroke-grid, #f3f4f6)" />
+                    <XAxis dataKey="month" stroke="#9ca3af" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#9ca3af" fontSize={11} tickLine={false} />
                     <Tooltip 
                       contentStyle={{ backgroundColor: 'var(--tooltip-bg, #fff)', borderColor: 'var(--tooltip-border, #e5e7eb)', borderRadius: '12px', fontSize: '11px', color: 'var(--tooltip-text, #1e293b)' }}
-                      formatter={(value) => [`${currencySymbols[selectedCurrency] || selectedCurrency}${value}`, 'Amount']} 
+                      formatter={(value) => [`${currencySymbols[selectedCurrency] || selectedCurrency}${value}`, 'Total spent']} 
                     />
-                    <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                  </PieChart>
+                    <Bar dataKey="Amount" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                  </BarChart>
                 </ResponsiveContainer>
-              )}
+              </div>
             </div>
-          </div>
-
-          <div className="bg-white dark:bg-slate-900 border border-gray-100 dark:border-slate-850 p-6 rounded-2xl shadow-sm">
-            <h3 className="text-sm font-bold text-gray-900 dark:text-slate-100 tracking-tight mb-1">📈 Monthly Spending Velocity ({selectedCurrency})</h3>
-            <p className="text-xs text-gray-500 dark:text-slate-400 mb-6">A real-time visual tracking of shared pool volume.</p>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={trendData}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--stroke-grid, #f3f4f6)" />
-                  <XAxis dataKey="month" stroke="#9ca3af" fontSize={11} tickLine={false} />
-                  <YAxis stroke="#9ca3af" fontSize={11} tickLine={false} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: 'var(--tooltip-bg, #fff)', borderColor: 'var(--tooltip-border, #e5e7eb)', borderRadius: '12px', fontSize: '11px', color: 'var(--tooltip-text, #1e293b)' }}
-                    formatter={(value) => [`${currencySymbols[selectedCurrency] || selectedCurrency}${value}`, 'Total spent']} 
-                  />
-                  <Bar dataKey="Amount" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
+          )}
         </div>
       )}
 
       {/* DASHBOARD LOGGED EXPENSES TABLE VIEW (Requirement #3) */}
-      <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden mt-8">
-        <div className="px-6 py-4 border-b border-slate-150 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-850/50">
-          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
-            📜 Roommates Transaction Log Database ({activeGroup?.name || 'Group'})
-          </h3>
+      {minimizedCards['recent_expenses'] ? (
+        <div className="mt-8">
+          {renderMinimizedCard('recent_expenses', 'Roommates Transaction Log Database', <Coins className="w-4.5 h-4.5 text-indigo-500" />)}
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden mt-8">
+          <div className="px-6 py-4 border-b border-slate-150 dark:border-slate-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-slate-50 dark:bg-slate-850/50">
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-1.5">
+                📜 Roommates Transaction Log Database ({activeGroup?.name || 'Group'})
+              </h3>
+              <button
+                onClick={() => toggleCardMinimize('recent_expenses')}
+                className="p-1 rounded-md hover:bg-slate-150 dark:hover:bg-slate-800 text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition cursor-pointer shadow-xs"
+                title="Minimize card"
+              >
+                <Minus className="w-3.5 h-3.5" />
+              </button>
+            </div>
           <div className="flex items-center gap-3 flex-wrap">
             {deletedExpenses.length > 0 && (
               <label className="flex items-center gap-2 cursor-pointer text-[11px] select-none bg-slate-150/70 hover:bg-slate-150 px-2.5 py-1 rounded-full font-semibold text-slate-650 dark:text-slate-350 transition-colors">
@@ -799,31 +967,31 @@ export default function Dashboard({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="bg-slate-150/80 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-bold uppercase tracking-wider text-[10px]">
-                  <th onClick={() => handleSort('date')} className="px-6 py-3 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                  <th onClick={() => handleSort('date')} className="px-4 py-2 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
                     <span className="flex items-center gap-1">
                       Date {sortField === 'date' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
                     </span>
                   </th>
-                  <th onClick={() => handleSort('description')} className="px-6 py-3 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                  <th onClick={() => handleSort('description')} className="px-4 py-2 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
                     <span className="flex items-center gap-1">
                       Description {sortField === 'description' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
                     </span>
                   </th>
-                  <th onClick={() => handleSort('category')} className="px-6 py-3 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                  <th onClick={() => handleSort('category')} className="px-4 py-2 cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
                     <span className="flex items-center gap-1">
                       Category {sortField === 'category' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
                     </span>
                   </th>
-                  <th className="px-6 py-3">Paid By</th>
-                  <th className="px-6 py-3">Created By</th>
-                  <th className="px-6 py-3 text-right">Original Cost</th>
-                  <th onClick={() => handleSort('amount')} className="px-6 py-3 text-right cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
+                  <th className="px-4 py-2">Paid By</th>
+                  <th className="px-4 py-2">Created By</th>
+                  <th className="px-4 py-2 text-right">Original Cost</th>
+                  <th onClick={() => handleSort('amount')} className="px-4 py-2 text-right cursor-pointer select-none hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors">
                     <span className="flex items-center justify-end gap-1">
                       Total ({selectedCurrency}) {sortField === 'amount' ? (sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />) : <ArrowUpDown className="w-3 h-3 opacity-50" />}
                     </span>
                   </th>
-                  <th className="px-6 py-3 text-right">My Share ({selectedCurrency})</th>
-                  <th className="px-6 py-3 text-center">Actions</th>
+                  <th className="px-4 py-2 text-right">My Share ({selectedCurrency})</th>
+                  <th className="px-4 py-2 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-900">
@@ -856,13 +1024,13 @@ export default function Dashboard({
                         isDeleted ? 'bg-rose-50/45 dark:bg-rose-950/10 text-slate-500' : ''
                       }`}
                     >
-                      <td className="px-6 py-4 font-mono text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
+                      <td className="px-4 py-2.5 font-mono text-slate-500 dark:text-slate-400 text-[11px] whitespace-nowrap">
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" />
                           <span className={isDeleted ? 'line-through' : ''}>{exp.date}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 py-2.5">
                         <div className={`font-semibold ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-800 dark:text-slate-300'}`}>
                           {exp.description}
                         </div>
@@ -870,14 +1038,14 @@ export default function Dashboard({
                           Splits: {splitDetails || 'None'}
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-2.5 whitespace-nowrap">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${
                           isDeleted ? 'bg-rose-100 text-rose-700' : 'bg-gray-150 dark:bg-slate-800 text-gray-650 dark:text-slate-300'
                         }`}>
                           {exp.category || 'Other'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-2.5 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-850 flex items-center justify-center font-bold text-[9px] text-slate-650 dark:text-slate-350 uppercase">
                             {payer?.name?.substring(0, 2) || '??'}
@@ -887,7 +1055,7 @@ export default function Dashboard({
                           </span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
+                      <td className="px-4 py-2.5 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           <div className="w-5 h-5 rounded-full bg-slate-100 dark:bg-slate-850 flex items-center justify-center font-bold text-[9px] text-slate-650 dark:text-slate-350 uppercase">
                             {creator?.name?.substring(0, 2) || '??'}
@@ -897,19 +1065,19 @@ export default function Dashboard({
                           </span>
                         </div>
                       </td>
-                      <td className={`px-6 py-4 text-right font-mono font-semibold whitespace-nowrap ${isDeleted ? 'text-slate-400 line-through' : 'text-slate-500 dark:text-slate-400'}`}>
+                      <td className={`px-4 py-2.5 text-right font-mono font-semibold whitespace-nowrap ${isDeleted ? 'text-slate-400 line-through' : 'text-slate-500 dark:text-slate-400'}`}>
                         {originalCost}
                       </td>
-                      <td className={`px-6 py-4 text-right font-mono font-bold whitespace-nowrap ${isDeleted ? 'text-rose-800/80 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
+                      <td className={`px-4 py-2.5 text-right font-mono font-bold whitespace-nowrap ${isDeleted ? 'text-rose-800/80 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
                         {currencySymbols[selectedCurrency] || selectedCurrency}{totalConverted.toFixed(2)}
                       </td>
-                      <td className={`px-6 py-4 text-right font-mono font-bold whitespace-nowrap ${isDeleted ? 'text-slate-400 line-through' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                      <td className={`px-4 py-2.5 text-right font-mono font-bold whitespace-nowrap ${isDeleted ? 'text-slate-400 line-through' : 'text-indigo-600 dark:text-indigo-400'}`}>
                         {myShareAmount > 0 
                           ? `${currencySymbols[selectedCurrency] || selectedCurrency}${myShareAmount.toFixed(2)}`
                           : '-'
                         }
                       </td>
-                      <td className="px-6 py-4 text-center whitespace-nowrap">
+                      <td className="px-4 py-2.5 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1">
                           {isDeleted ? (
                             <span className="text-[9px] font-bold text-rose-650 bg-rose-100 dark:bg-rose-950/40 dark:text-rose-400 px-2 py-0.5 rounded-full uppercase tracking-wider">
@@ -958,6 +1126,7 @@ export default function Dashboard({
           )}
         </div>
       </div>
+    )}
 
       {/* RENDER EDIT TRANSACTION MODAL */}
       {editingExpense && activeGroup && (
