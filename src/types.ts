@@ -34,10 +34,25 @@ export interface ExpenseSplit {
   share?: number;
 }
 
+export interface FlagHistoryEntry {
+  timestamp: string;
+  userId?: string;
+  userName?: string;
+  action?: 'flag' | 'resolve';
+  type?: 'flag' | 'resolve';
+  authorId?: string;
+  authorName?: string;
+  comment: string;
+}
+
 export interface ExpenseItem {
   id: string;
   description: string;
   amount: number;
+  discountType?: 'percentage' | 'amount' | 'none';
+  discountValue?: number;
+  discountedAmount?: number;
+  finalAmount?: number;
 }
 
 export interface Expense {
@@ -55,6 +70,19 @@ export interface Expense {
   createdAt: string;
   isDeleted?: boolean;
   createdBy?: string;
+  
+  // Discounts
+  discountType?: 'percentage' | 'amount' | 'none';
+  discountValue?: number;
+  discountedAmount?: number;
+  originalAmount?: number;
+
+  // Flagging
+  isFlagged?: boolean;
+  flagReason?: string;
+  flagResolved?: boolean;
+  flagResolution?: string;
+  flagHistory?: FlagHistoryEntry[];
 }
 
 export interface Invite {

@@ -1197,8 +1197,14 @@ export default function App() {
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
-                    <div className="mt-8 [writing-mode:vertical-lr] rotate-180 text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest select-none whitespace-nowrap">
-                      Active Rooms {selectedGroup ? `• ${selectedGroup.name}` : ''}
+                    <div className="mt-8 [writing-mode:vertical-lr] rotate-180 text-[11px] font-bold select-none whitespace-nowrap flex items-center gap-1">
+                      <span className="text-indigo-600 dark:text-indigo-400 font-extrabold uppercase tracking-widest">Active Rooms</span>
+                      {selectedGroup && (
+                        <>
+                          <span className="text-slate-300 dark:text-slate-600 mx-1">•</span>
+                          <span className="text-slate-700 dark:text-slate-300 normal-case font-semibold">{selectedGroup.name}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                   {/* Collapsed Expand Button on Mobile */}

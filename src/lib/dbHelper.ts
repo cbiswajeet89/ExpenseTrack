@@ -8,6 +8,7 @@ import {
   getDocs, 
   setDoc, 
   doc, 
+  getDoc,
   addDoc, 
   query, 
   where, 
@@ -17,6 +18,27 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase.js';
 import { User, Group, Expense, Invite, UserRole } from '../types.js';
+
+// Helper to recursively remove undefined properties from an object so Firestore setDoc/updateDoc doesn't fail
+export function cleanUndefined<T>(obj: T): T {
+  if (obj === null || obj === undefined) {
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => cleanUndefined(item)) as any;
+  }
+  if (typeof obj === 'object') {
+    const res: any = {};
+    for (const key of Object.keys(obj)) {
+      const val = (obj as any)[key];
+      if (val !== undefined) {
+        res[key] = cleanUndefined(val);
+      }
+    }
+    return res;
+  }
+  return obj;
+}
 
 // Default mock users list to seed Firestore
 export const DEFAULT_USERS: User[] = [
@@ -298,7 +320,8 @@ export async function createExpenseInDb(expense: Omit<Expense, 'id' | 'createdAt
     id,
     createdAt: new Date().toISOString()
   };
-  await setDoc(doc(db, 'expenses', id), newExpense);
+  const cleanedExpense = cleanUndefined(newExpense);
+  await setDoc(doc(db, 'expenses', id), cleanedExpense);
 
   // Update group totalExpense
   const groupRef = doc(db, 'groups', expense.groupId);
@@ -360,12 +383,28 @@ export async function updateExpenseInDb(
   oldAmount: number
 ): Promise<Expense> {
   const expenseRef = doc(db, 'expenses', expenseId);
+  
+  // Retrieve the existing expense document to preserve its original creation time
+  let originalCreatedAt = new Date().toISOString();
+  try {
+    const docSnap = await getDoc(expenseRef);
+    if (docSnap.exists()) {
+      const existingData = docSnap.data() as Expense;
+      if (existingData.createdAt) {
+        originalCreatedAt = existingData.createdAt;
+      }
+    }
+  } catch (err) {
+    console.warn('[Firestore] Could not fetch original createdAt timestamp, fallback to current time.', err);
+  }
+
   const updatedWithTimestamp: Expense = {
     ...updatedExpense,
     id: expenseId,
-    createdAt: new Date().toISOString() // we can preserve or update timestamp, updating is fine
+    createdAt: originalCreatedAt
   };
-  await setDoc(expenseRef, updatedWithTimestamp);
+  const cleanedExpense = cleanUndefined(updatedWithTimestamp);
+  await setDoc(expenseRef, cleanedExpense);
 
   // Update group totalExpense by subtracting old amount and adding new amount
   const groupRef = doc(db, 'groups', updatedExpense.groupId);

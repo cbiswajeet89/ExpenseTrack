@@ -29,9 +29,12 @@ import {
   ArrowRight,
   Info,
   Minus,
-  Maximize2
+  Maximize2,
+  Flag,
+  History
 } from 'lucide-react';
 import EditExpenseModal from './EditExpenseModal.js';
+import FlagHistoryModal from './FlagHistoryModal.js';
 
 interface GroupDetailProps {
   group: Group;
@@ -409,9 +412,126 @@ export default function GroupDetail({
   const [shares, setShares] = useState<{ [userId: string]: string }>({});
 
   // Sub-items list (itemized ledger)
-  const [items, setItems] = useState<Array<{ id: string; description: string; amount: string }>>([]);
+  const [items, setItems] = useState<Array<{
+    id: string;
+    description: string;
+    amount: number;
+    discountType?: 'none' | 'percentage' | 'amount';
+    discountValue?: number;
+    discountedAmount?: number;
+    finalAmount?: number;
+  }>>([]);
   const [newItemDesc, setNewItemDesc] = useState('');
   const [newItemAmount, setNewItemAmount] = useState('');
+  const [newItemDiscountType, setNewItemDiscountType] = useState<'none' | 'percentage' | 'amount'>('none');
+  const [newItemDiscountValue, setNewItemDiscountValue] = useState('');
+
+  // Overall Discount States
+  const [overallDiscountType, setOverallDiscountType] = useState<'none' | 'percentage' | 'amount'>('none');
+  const [overallDiscountValue, setOverallDiscountValue] = useState('');
+
+  // Flagging / Audit States
+  const [activeFlagInputId, setActiveFlagInputId] = useState<string | null>(null);
+  const [activeResolveInputId, setActiveResolveInputId] = useState<string | null>(null);
+  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+  const [activeEditFlagInputId, setActiveEditFlagInputId] = useState<string | null>(null);
+  const [flagReasonText, setFlagReasonText] = useState('');
+  const [resolveCommentText, setResolveCommentText] = useState('');
+  const [editFlagReasonText, setEditFlagReasonText] = useState('');
+  const [historyModalExpense, setHistoryModalExpense] = useState<Expense | null>(null);
+
+  const handleEditFlagReason = async (expense: Expense) => {
+    if (!editFlagReasonText.trim() || !onUpdateExpense) return;
+    const currentUserObj = users.find(u => u.id === currentUserId);
+    const currentUserName = currentUserObj?.name || 'Unknown User';
+    
+    const historyItem = {
+      type: 'flag' as const,
+      comment: `Updated flag reason to: "${editFlagReasonText.trim()}"`,
+      authorId: currentUserId,
+      authorName: currentUserName,
+      timestamp: new Date().toISOString()
+    };
+    
+    const updatedHistory = [...(expense.flagHistory || []), historyItem];
+    
+    const { id, createdAt, ...payload } = {
+      ...expense,
+      isFlagged: true,
+      flagReason: editFlagReasonText.trim(),
+      flagHistory: updatedHistory
+    };
+    
+    try {
+      await onUpdateExpense(expense.id, payload as any, expense.amount);
+      setEditFlagReasonText('');
+      setActiveEditFlagInputId(null);
+    } catch (err) {
+      console.error('Error updating flag reason:', err);
+    }
+  };
+
+  const handleFlagExpense = async (expense: Expense) => {
+    if (!flagReasonText.trim() || !onUpdateExpense) return;
+    const currentUserObj = users.find(u => u.id === currentUserId);
+    const currentUserName = currentUserObj?.name || 'Unknown User';
+    
+    const historyItem = {
+      type: 'flag' as const,
+      comment: flagReasonText.trim(),
+      authorId: currentUserId,
+      authorName: currentUserName,
+      timestamp: new Date().toISOString()
+    };
+    
+    const updatedHistory = [...(expense.flagHistory || []), historyItem];
+    
+    const { id, createdAt, ...payload } = {
+      ...expense,
+      isFlagged: true,
+      flagReason: flagReasonText.trim(),
+      flagHistory: updatedHistory
+    };
+    
+    try {
+      await onUpdateExpense(expense.id, payload as any, expense.amount);
+      setFlagReasonText('');
+      setActiveFlagInputId(null);
+    } catch (err) {
+      console.error('Error flagging expense:', err);
+    }
+  };
+
+  const handleResolveFlag = async (expense: Expense) => {
+    if (!resolveCommentText.trim() || !onUpdateExpense) return;
+    const currentUserObj = users.find(u => u.id === currentUserId);
+    const currentUserName = currentUserObj?.name || 'Unknown User';
+    
+    const historyItem = {
+      type: 'resolve' as const,
+      comment: resolveCommentText.trim(),
+      authorId: currentUserId,
+      authorName: currentUserName,
+      timestamp: new Date().toISOString()
+    };
+    
+    const updatedHistory = [...(expense.flagHistory || []), historyItem];
+    
+    const { id, createdAt, ...payload } = {
+      ...expense,
+      isFlagged: false,
+      flagHistory: updatedHistory
+    };
+    delete (payload as any).flagReason;
+    
+    try {
+      await onUpdateExpense(expense.id, payload as any, expense.amount);
+      setResolveCommentText('');
+      setActiveResolveInputId(null);
+    } catch (err) {
+      console.error('Error resolving flag:', err);
+    }
+  };
 
   // Form States - Invite
   const [inviteEmail, setInviteEmail] = useState('');
@@ -435,33 +555,68 @@ export default function GroupDetail({
     'Other'
   ];
 
-  // Helper to append itemized sub-items to calculation
+  // Helper to append itemized sub-items to calculation with item-level discounts
   const handleAddItem = () => {
     if (!newItemDesc.trim() || !newItemAmount) return;
+    const origAmt = parseFloat(newItemAmount) || 0;
+    let discAmt = 0;
+    const discVal = parseFloat(newItemDiscountValue) || 0;
+
+    if (newItemDiscountType === 'percentage') {
+      discAmt = Number(((discVal / 100) * origAmt).toFixed(2));
+    } else if (newItemDiscountType === 'amount') {
+      discAmt = Number(discVal.toFixed(2));
+    }
+
+    const finalAmt = Number(Math.max(0, origAmt - discAmt).toFixed(2));
     const id = `it_${Math.random().toString(36).substr(2, 9)}`;
-    const updatedItems = [...items, { id, description: newItemDesc, amount: newItemAmount }];
+    const updatedItems = [
+      ...items,
+      {
+        id,
+        description: newItemDesc.trim(),
+        amount: origAmt,
+        discountType: newItemDiscountType,
+        discountValue: discVal,
+        discountedAmount: discAmt,
+        finalAmount: finalAmt
+      }
+    ];
     setItems(updatedItems);
     
     // Automatically recalculate total amount based on itemized entries
-    const sum = updatedItems.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+    const sum = updatedItems.reduce((acc, curr) => acc + (curr.finalAmount !== undefined ? curr.finalAmount : curr.amount), 0);
     setAmount(sum.toFixed(2));
     
     setNewItemDesc('');
     setNewItemAmount('');
+    setNewItemDiscountType('none');
+    setNewItemDiscountValue('');
   };
 
   const handleRemoveItem = (id: string) => {
     const updatedItems = items.filter(it => it.id !== id);
     setItems(updatedItems);
-    const sum = updatedItems.reduce((acc, curr) => acc + (parseFloat(curr.amount) || 0), 0);
+    const sum = updatedItems.reduce((acc, curr) => acc + (curr.finalAmount !== undefined ? curr.finalAmount : curr.amount), 0);
     setAmount(sum.toFixed(2));
   };
 
-  // Submit Expense split logging
+  // Submit Expense split logging (incorporates overall discount and splits on final price)
   const handleExpenseSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const finalAmount = parseFloat(amount);
-    if (!desc.trim() || isNaN(finalAmount) || finalAmount <= 0) return;
+    const baseAmount = parseFloat(amount);
+    if (!desc.trim() || isNaN(baseAmount) || baseAmount <= 0) return;
+
+    // Calculate overall discount
+    let overallDiscAmt = 0;
+    const overallDiscVal = parseFloat(overallDiscountValue) || 0;
+    if (overallDiscountType === 'percentage') {
+      overallDiscAmt = Number(((overallDiscVal / 100) * baseAmount).toFixed(2));
+    } else if (overallDiscountType === 'amount') {
+      overallDiscAmt = Number(overallDiscVal.toFixed(2));
+    }
+
+    const finalAmount = Number(Math.max(0, baseAmount - overallDiscAmt).toFixed(2));
 
     // Build the splits depending on chosen method
     const splits: ExpenseSplit[] = [];
@@ -484,7 +639,7 @@ export default function GroupDetail({
       });
 
       if (Math.abs(sumExact - finalAmount) > 0.05) {
-        alert(`Exact splits must sum to the total amount of ${finalAmount}. Current sum is ${sumExact}.`);
+        alert(`Exact splits must sum to the final discounted total amount of ${finalAmount}. Current sum is ${sumExact}.`);
         return;
       }
     } else if (splitMethod === 'shares') {
@@ -508,21 +663,33 @@ export default function GroupDetail({
 
     const payload: Omit<Expense, 'id' | 'createdAt'> = {
       groupId: group.id,
-      description: desc,
+      description: desc.trim(),
       amount: finalAmount,
       currency: group.currency,
       date,
       paidBy,
       splitMethod,
       splits,
-      items: items.map(it => ({ id: it.id, description: it.description, amount: parseFloat(it.amount) })),
-      category
+      items: items.map(it => ({
+        id: it.id,
+        description: it.description,
+        amount: it.amount,
+        discountType: it.discountType || 'none',
+        discountValue: it.discountValue || 0,
+        discountedAmount: it.discountedAmount || 0,
+        finalAmount: it.finalAmount !== undefined ? it.finalAmount : it.amount
+      })),
+      category,
+      discountType: overallDiscountType,
+      discountValue: overallDiscVal,
+      discountedAmount: overallDiscAmt,
+      originalAmount: baseAmount
     };
 
     setConfirmDialog({
       isOpen: true,
       title: 'Log Split Expense',
-      message: `Are you sure you want to log this expense of ${group.currency} ${finalAmount.toFixed(2)} for "${desc}"?`,
+      message: `Are you sure you want to log this expense of ${group.currency} ${finalAmount.toFixed(2)} (Original: ${group.currency} ${baseAmount.toFixed(2)}, Discount: ${group.currency} ${overallDiscAmt.toFixed(2)}) for "${desc}"?`,
       type: 'info',
       onConfirm: async () => {
         setConfirmDialog(null);
@@ -534,6 +701,10 @@ export default function GroupDetail({
           setItems([]);
           setExactAmounts({});
           setShares({});
+          setOverallDiscountType('none');
+          setOverallDiscountValue('');
+          setNewItemDiscountType('none');
+          setNewItemDiscountValue('');
         } catch (err) {
           console.error(err);
         }
@@ -607,7 +778,7 @@ export default function GroupDetail({
 
   return (
     <div className="space-y-8 font-sans">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
         
         {/* LEFT & CENTER COLUMN: Active group header info and addition forms */}
         <div className="lg:col-span-2 space-y-8">
@@ -737,23 +908,103 @@ export default function GroupDetail({
                 </div>
               </div>
 
+              {/* Overall Discount Section */}
+              <div className="border border-slate-100 dark:border-slate-800 rounded-2xl p-4 bg-slate-50/30 dark:bg-slate-900/40">
+                <label className="block text-xs font-semibold text-gray-750 dark:text-slate-300 mb-2 flex items-center gap-1.5">
+                  🏷️ Overall Discount Options
+                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-1 bg-white dark:bg-slate-950 p-1 border border-slate-200 dark:border-slate-800 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => { setOverallDiscountType('none'); setOverallDiscountValue(''); }}
+                      className={`px-3 py-1 text-xs font-semibold rounded-lg transition cursor-pointer ${overallDiscountType === 'none' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      No Discount
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOverallDiscountType('percentage')}
+                      className={`px-3 py-1 text-xs font-semibold rounded-lg transition cursor-pointer ${overallDiscountType === 'percentage' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      Percentage (%)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOverallDiscountType('amount')}
+                      className={`px-3 py-1 text-xs font-semibold rounded-lg transition cursor-pointer ${overallDiscountType === 'amount' ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-800'}`}
+                    >
+                      Fixed Amount ({group.currency})
+                    </button>
+                  </div>
+
+                  {overallDiscountType !== 'none' && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-slate-500">Discount Value:</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        placeholder={overallDiscountType === 'percentage' ? 'e.g. 10' : '0.00'}
+                        value={overallDiscountValue}
+                        onChange={(e) => setOverallDiscountValue(e.target.value)}
+                        className="w-24 px-3 py-1.5 border border-slate-200 dark:border-slate-850 rounded-xl text-xs font-mono bg-white dark:bg-slate-950 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Live Preview of Overall Discount Calculation */}
+                {overallDiscountType !== 'none' && amount && (
+                  <div className="mt-3 text-xs bg-emerald-50/50 dark:bg-emerald-950/10 border border-emerald-100 dark:border-emerald-900/40 p-2.5 rounded-xl flex items-center justify-between text-emerald-800 dark:text-emerald-400">
+                    <div>
+                      <span>Original Base total: <strong>{group.currency} {Number(amount).toFixed(2)}</strong></span>
+                      <span className="mx-2">•</span>
+                      <span>Discount: <strong>
+                        {overallDiscountType === 'percentage' 
+                          ? `${overallDiscountValue || 0}%` 
+                          : `${group.currency} ${Number(overallDiscountValue || 0).toFixed(2)}`}
+                      </strong></span>
+                    </div>
+                    <div className="font-semibold text-right">
+                      Final split total: {group.currency} {Math.max(0, parseFloat(amount) - (overallDiscountType === 'percentage' ? (parseFloat(overallDiscountValue || '0') / 100) * parseFloat(amount) : parseFloat(overallDiscountValue || '0'))).toFixed(2)}
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* Itemized expense list section */}
-              <div className="border border-gray-100 rounded-2xl p-4 bg-gray-50/50">
-                <label className="block text-xs font-semibold text-gray-700 mb-2 flex items-center gap-1">
+              <div className="border border-gray-100 dark:border-slate-800 rounded-2xl p-4 bg-gray-50/50 dark:bg-slate-900/20">
+                <label className="block text-xs font-semibold text-gray-700 dark:text-slate-300 mb-2 flex items-center gap-1">
                   <Receipt className="w-4 h-4 text-gray-500" /> Itemized Expense Details (Optional)
                 </label>
                 <p className="text-[10px] text-gray-400 mb-3">
-                  Logging sub-items automatically calculates the main split sum above.
+                  Logging sub-items automatically calculates the main split sum above. Individual item discounts can be provided.
                 </p>
 
                 {items.length > 0 && (
                   <div className="space-y-1.5 mb-3">
                     {items.map((it) => (
-                      <div key={it.id} className="flex items-center justify-between text-xs bg-white border border-gray-100 px-3 py-1.5 rounded-xl">
-                        <span className="font-medium text-gray-700">{it.description}</span>
+                      <div key={it.id} className="flex items-center justify-between text-xs bg-white dark:bg-slate-950 border border-gray-100 dark:border-slate-850 px-3 py-1.5 rounded-xl">
+                        <div className="flex flex-col">
+                          <span className="font-medium text-gray-700 dark:text-slate-300">{it.description}</span>
+                          {it.discountType && it.discountType !== 'none' && (
+                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                              Discount: {it.discountType === 'percentage' ? `${it.discountValue}%` : `${group.currency} ${Number(it.discountValue).toFixed(2)}`} (-{group.currency} {Number(it.discountedAmount).toFixed(2)})
+                            </span>
+                          )}
+                        </div>
                         <div className="flex items-center gap-3">
-                          <span className="font-mono font-semibold text-gray-900">{group.currency} {it.amount}</span>
-                          <button type="button" onClick={() => handleRemoveItem(it.id)} className="text-red-500 hover:text-red-600">
+                          <div className="text-right">
+                            {it.discountType && it.discountType !== 'none' ? (
+                              <>
+                                <span className="font-mono text-[10px] text-gray-400 dark:text-slate-500 line-through mr-1.5">{group.currency} {Number(it.amount).toFixed(2)}</span>
+                                <span className="font-mono font-semibold text-gray-900 dark:text-slate-200">{group.currency} {Number(it.finalAmount).toFixed(2)}</span>
+                              </>
+                            ) : (
+                              <span className="font-mono font-semibold text-gray-900 dark:text-slate-200">{group.currency} {Number(it.amount).toFixed(2)}</span>
+                            )}
+                          </div>
+                          <button type="button" onClick={() => handleRemoveItem(it.id)} className="text-red-500 hover:text-red-600 cursor-pointer">
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </div>
@@ -762,29 +1013,51 @@ export default function GroupDetail({
                   </div>
                 )}
 
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newItemDesc}
-                    onChange={(e) => setNewItemDesc(e.target.value)}
-                    placeholder="Sub-item name"
-                    className="flex-1 px-3 py-1.5 border border-gray-200 rounded-xl text-xs bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={newItemAmount}
-                    onChange={(e) => setNewItemAmount(e.target.value)}
-                    placeholder="Price"
-                    className="w-24 px-3 py-1.5 border border-gray-200 rounded-xl text-xs font-mono bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddItem}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-3 rounded-xl flex items-center justify-center transition shadow-md shadow-indigo-100"
-                  >
-                    Add Item
-                  </button>
+                <div className="flex flex-col gap-2 mt-2 bg-slate-100/50 dark:bg-slate-950/45 p-3 rounded-xl border border-slate-200/50 dark:border-slate-850">
+                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Add New Sub-item</span>
+                  <div className="flex flex-wrap gap-2">
+                    <input
+                      type="text"
+                      value={newItemDesc}
+                      onChange={(e) => setNewItemDesc(e.target.value)}
+                      placeholder="Sub-item name"
+                      className="flex-1 min-w-[150px] px-3 py-1.5 border border-gray-200 dark:border-slate-800 rounded-xl text-xs bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={newItemAmount}
+                      onChange={(e) => setNewItemAmount(e.target.value)}
+                      placeholder="Price"
+                      className="w-24 px-3 py-1.5 border border-gray-200 dark:border-slate-800 rounded-xl text-xs font-mono bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    />
+                    <select
+                      value={newItemDiscountType}
+                      onChange={(e) => setNewItemDiscountType(e.target.value as 'none' | 'percentage' | 'amount')}
+                      className="px-2.5 py-1.5 border border-gray-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 text-xs focus:outline-none text-slate-700 dark:text-slate-300"
+                    >
+                      <option value="none">No Discount</option>
+                      <option value="percentage">Discount %</option>
+                      <option value="amount">Discount Amt</option>
+                    </select>
+                    {newItemDiscountType !== 'none' && (
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={newItemDiscountValue}
+                        onChange={(e) => setNewItemDiscountValue(e.target.value)}
+                        placeholder={newItemDiscountType === 'percentage' ? '%' : group.currency}
+                        className="w-20 px-3 py-1.5 border border-gray-200 dark:border-slate-800 rounded-xl text-xs font-mono bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                      />
+                    )}
+                    <button
+                      type="button"
+                      onClick={handleAddItem}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-3 rounded-xl flex items-center justify-center transition shadow-md shadow-indigo-100 cursor-pointer"
+                    >
+                      Add Item
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -1592,91 +1865,356 @@ export default function GroupDetail({
                 return (
                   <div 
                     key={exp.id} 
-                    className={`py-4 flex justify-between items-center text-xs group transition-all duration-150 ${
-                      isDeleted ? 'bg-rose-50/45 dark:bg-rose-950/10 border-l-4 border-rose-500 px-3 my-1.5 rounded-xl opacity-85' : ''
+                    className={`p-4 my-2 rounded-xl border transition-all duration-150 ${
+                      isDeleted 
+                        ? 'bg-rose-50/45 dark:bg-rose-950/10 border-rose-200 dark:border-rose-900/40 opacity-85' 
+                        : exp.isFlagged 
+                          ? 'bg-amber-50/35 dark:bg-amber-950/10 border-amber-300 dark:border-amber-800/60 shadow-xs' 
+                          : 'bg-white dark:bg-slate-900/65 border-gray-100 dark:border-slate-850'
                     }`}
                   >
-                    <div className="space-y-1">
-                      <h4 className={`font-semibold ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-800 dark:text-slate-200'}`}>
-                        {exp.description}
-                      </h4>
-                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
-                        <span className={`px-1.5 py-0.5 rounded uppercase font-bold tracking-wide font-mono text-[9px] ${
-                          isDeleted ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400' : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-350'
-                        }`}>
-                          {exp.category}
-                        </span>
-                        <span>• Paid by <strong>{payingUser?.name || 'Unknown'}</strong></span>
-                        <span>• Created by <strong>{creatorUser?.name || 'System'}</strong></span>
-                        <span>• {exp.date}</span>
-                        {isDeleted && (
-                          <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider bg-rose-100/50 dark:bg-rose-950/55 px-2 py-0.5 rounded-full">
-                            Deleted (Audit trail preserved)
+                    <div className="flex justify-between items-center text-xs group">
+                      <div className="space-y-1 flex-1 pr-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className={`font-semibold ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-800 dark:text-slate-200'}`}>
+                            {exp.description}
+                          </h4>
+                          {exp.isFlagged && (
+                            <span className="bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-400 font-bold uppercase text-[8px] px-1.5 py-0.2 rounded tracking-wide flex items-center gap-0.5 animate-pulse">
+                              <Flag className="w-2.5 h-2.5 fill-current" /> Flagged
+                            </span>
+                          )}
+                        </div>
+
+                        {exp.discountType && exp.discountType !== 'none' && (
+                          <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1 mt-0.5">
+                            🏷️ Discount Applied: {exp.discountType === 'percentage' ? `${exp.discountValue}%` : `${exp.currency} ${exp.discountValue}`} Off (Saved {exp.currency} {exp.discountedAmount?.toFixed(2)})
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap items-center gap-2 text-[10px] text-gray-400">
+                          <span className={`px-1.5 py-0.5 rounded uppercase font-bold tracking-wide font-mono text-[9px] ${
+                            isDeleted ? 'bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400' : 'bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-gray-350'
+                          }`}>
+                            {exp.category}
                           </span>
+                          <span>• Paid by <strong>{payingUser?.name || 'Unknown'}</strong></span>
+                          <span>• Created by <strong>{creatorUser?.name || 'System'}</strong></span>
+                          <span>• {exp.date}</span>
+                          {isDeleted && (
+                            <span className="text-[10px] text-rose-600 font-bold uppercase tracking-wider bg-rose-100/50 dark:bg-rose-950/55 px-2 py-0.5 rounded-full">
+                              Deleted (Audit trail preserved)
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Flag Warning Statement */}
+                        {exp.isFlagged && (
+                          <div className="mt-2 bg-amber-55 dark:bg-amber-950/30 border border-amber-200/50 dark:border-amber-900/30 p-2.5 rounded-xl text-[10px] text-amber-850 dark:text-amber-450 flex items-start gap-1.5 font-medium leading-relaxed">
+                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-500 mt-0.5" />
+                            <div className="flex-1">
+                              <span className="font-bold">FLAG REASON:</span> "{exp.flagReason}"
+                            </div>
+                            {exp.flagHistory && exp.flagHistory.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setHistoryModalExpense(exp)}
+                                className="text-indigo-605 dark:text-indigo-400 hover:underline text-[10px] font-bold cursor-pointer shrink-0 ml-2"
+                              >
+                                View Flag Comments
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (activeEditFlagInputId === exp.id) {
+                                  setActiveEditFlagInputId(null);
+                                } else {
+                                  setActiveEditFlagInputId(exp.id);
+                                  setEditFlagReasonText(exp.flagReason || '');
+                                  setActiveFlagInputId(null);
+                                  setActiveResolveInputId(null);
+                                }
+                              }}
+                              className="text-indigo-600 dark:text-indigo-400 hover:underline text-[10px] font-bold cursor-pointer shrink-0 ml-2"
+                            >
+                              Edit Reason
+                            </button>
+                          </div>
+                        )}
+
+                        {/* Display sub-items if present with discounts */}
+                        {exp.items && exp.items.length > 0 && (
+                          <div className={`mt-2 p-2.5 rounded-xl space-y-1 text-[10px] ${
+                            isDeleted ? 'bg-rose-100/20 dark:bg-rose-950/20' : 'bg-slate-50 dark:bg-slate-950/60 border border-slate-100 dark:border-slate-850'
+                          }`}>
+                            <span className={`font-semibold block uppercase tracking-wider text-[8px] ${
+                              isDeleted ? 'text-rose-500' : 'text-gray-400 dark:text-slate-500'
+                            }`}>
+                              Itemized breakdown:
+                            </span>
+                            {exp.items.map((it, idx) => {
+                              const itemDiscType = (it as any).discountType;
+                              const itemDiscVal = (it as any).discountValue;
+                              const itemDiscAmt = (it as any).discountedAmount;
+                              const itemFinalAmt = (it as any).finalAmount;
+                              const hasItemDisc = itemDiscType && itemDiscType !== 'none';
+
+                              return (
+                                <div key={idx} className={`flex justify-between ${isDeleted ? 'text-rose-700/70 dark:text-rose-400 line-through' : 'text-gray-500 dark:text-slate-400'}`}>
+                                  <div className="flex flex-col">
+                                    <span>- {it.description}</span>
+                                    {hasItemDisc && (
+                                      <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-medium">
+                                        Discount: {itemDiscType === 'percentage' ? `${itemDiscVal}%` : `${exp.currency} ${itemDiscVal}`} (-{exp.currency} {Number(itemDiscAmt).toFixed(2)})
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-right">
+                                    {hasItemDisc ? (
+                                      <>
+                                        <span className="font-mono text-[9px] text-gray-400 dark:text-slate-500 line-through mr-1.5">{exp.currency} {it.amount.toFixed(2)}</span>
+                                        <span className="font-mono font-semibold text-slate-850 dark:text-slate-200">{exp.currency} {Number(itemFinalAmt).toFixed(2)}</span>
+                                      </>
+                                    ) : (
+                                      <span className="font-mono">{exp.currency} {it.amount.toFixed(2)}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         )}
                       </div>
 
-                      {/* Display sub-items if present */}
-                      {exp.items && exp.items.length > 0 && (
-                        <div className={`mt-1.5 p-2 rounded-lg space-y-1 text-[10px] ${
-                          isDeleted ? 'bg-rose-100/20 dark:bg-rose-950/20' : 'bg-gray-50/50 dark:bg-slate-900/60'
-                        }`}>
-                          <span className={`font-semibold block uppercase tracking-wider text-[8px] ${
-                            isDeleted ? 'text-rose-500' : 'text-gray-500'
-                          }`}>
-                            Itemized breakdown:
-                          </span>
-                          {exp.items.map((it, idx) => (
-                            <div key={idx} className={`flex justify-between ${isDeleted ? 'text-rose-700/70 dark:text-rose-400 line-through' : 'text-gray-500 dark:text-slate-400'}`}>
-                              <span>- {it.description}</span>
-                              <span className="font-mono">{group.currency} {it.amount.toFixed(2)}</span>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <div className="flex items-center gap-1.5 justify-end">
+                            {exp.discountType && exp.discountType !== 'none' && (
+                              <span className="text-[10px] text-gray-400 dark:text-slate-500 line-through font-mono">
+                                {exp.currency} {Number(exp.originalAmount || exp.amount).toFixed(2)}
+                              </span>
+                            )}
+                            <span className={`font-bold font-mono text-sm ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
+                              {exp.currency} {Number(exp.amount).toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="text-[9px] text-gray-400 font-medium uppercase mt-0.5">
+                            {exp.splitMethod === 'equal' ? 'Split Equally' : exp.splitMethod === 'exact' ? 'Exact Allocation' : 'Proportional Shares'}
+                          </p>
+                        </div>
+
+                        {!isDeleted && onUpdateExpense && (
+                          <div className="flex items-center gap-1.5">
+                            {/* Flag / Resolve Action Toggle button */}
+                            {exp.isFlagged ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (activeResolveInputId === exp.id) {
+                                    setActiveResolveInputId(null);
+                                  } else {
+                                    setActiveResolveInputId(exp.id);
+                                    setActiveFlagInputId(null);
+                                    setResolveCommentText('');
+                                  }
+                                }}
+                                title="Resolve or clear active transaction flag"
+                                className="p-1.5 text-amber-500 hover:text-amber-600 dark:hover:text-amber-400 bg-amber-50 dark:bg-amber-950/45 hover:bg-amber-100 rounded-lg transition cursor-pointer"
+                              >
+                                <Flag className="w-3.5 h-3.5 fill-current" />
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (activeFlagInputId === exp.id) {
+                                    setActiveFlagInputId(null);
+                                  } else {
+                                    setActiveFlagInputId(exp.id);
+                                    setActiveResolveInputId(null);
+                                    setFlagReasonText('');
+                                  }
+                                }}
+                                title="Flag this transaction with comments"
+                                className="p-1.5 text-slate-400 hover:text-amber-500 dark:text-slate-500 dark:hover:text-amber-400 bg-slate-50 dark:bg-slate-850 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition cursor-pointer"
+                              >
+                                <Flag className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {/* View Flag Audit History expander */}
+                            {exp.flagHistory && exp.flagHistory.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setHistoryModalExpense(exp)}
+                                title="View transaction flag history and audits"
+                                className="p-1.5 rounded-lg transition cursor-pointer text-slate-400 hover:text-slate-655 dark:text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-800"
+                              >
+                                <History className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {!isDeleted && showDelete && onUpdateExpense && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingExpense(exp)}
+                            title="Modify transaction details"
+                            className="text-gray-400 hover:text-indigo-650 transition cursor-pointer"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {!isDeleted && showDelete && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setConfirmDialog({
+                                isOpen: true,
+                                title: 'Delete Expense',
+                                message: `Are you sure you want to delete this expense of ${exp.currency} ${Number(exp.amount).toFixed(2)} for "${exp.description}"? This will move it to the audit log trail and adjust group total calculations.`,
+                                type: 'danger',
+                                onConfirm: () => {
+                                  setConfirmDialog(null);
+                                  onDeleteExpense(exp.id, exp.amount);
+                                }
+                              });
+                            }}
+                            className="text-gray-400 hover:text-red-500 transition cursor-pointer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Inline Flag Comment Entry Input Collapsible */}
+                    {activeFlagInputId === exp.id && (
+                      <div className="mt-2.5 p-3 rounded-xl bg-amber-50/20 dark:bg-amber-950/5 border border-amber-200/50 dark:border-amber-900/30 space-y-2">
+                        <label className="block text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                          Flag Transaction with Audit Comment
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            required
+                            placeholder="State reason why this transaction is being flagged..."
+                            value={flagReasonText}
+                            onChange={(e) => setFlagReasonText(e.target.value)}
+                            className="flex-1 px-3 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-white dark:bg-slate-950 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-850 dark:text-slate-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleFlagExpense(exp)}
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs px-3 rounded-lg flex items-center justify-center transition cursor-pointer"
+                          >
+                            Submit Flag
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setActiveFlagInputId(null); setFlagReasonText(''); }}
+                            className="text-gray-400 hover:text-gray-600 text-xs px-2 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Inline Resolve Comment Entry Input Collapsible */}
+                    {activeResolveInputId === exp.id && (
+                      <div className="mt-2.5 p-3 rounded-xl bg-emerald-50/20 dark:bg-emerald-950/5 border border-emerald-200/50 dark:border-emerald-900/30 space-y-2">
+                        <label className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wide">
+                          Resolve Flag Action with Audit Comment
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            required
+                            placeholder="Enter comment describing the resolution..."
+                            value={resolveCommentText}
+                            onChange={(e) => setResolveCommentText(e.target.value)}
+                            className="flex-1 px-3 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-white dark:bg-slate-950 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-slate-850 dark:text-slate-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleResolveFlag(exp)}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs px-3 rounded-lg flex items-center justify-center transition cursor-pointer"
+                          >
+                            Resolve Flag
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setActiveResolveInputId(null); setResolveCommentText(''); }}
+                            className="text-gray-400 hover:text-gray-600 text-xs px-2 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Inline Edit Flag Comment Entry Input Collapsible */}
+                    {activeEditFlagInputId === exp.id && (
+                      <div className="mt-2.5 p-3 rounded-xl bg-amber-50/20 dark:bg-amber-950/5 border border-amber-200/50 dark:border-amber-900/30 space-y-2">
+                        <label className="block text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wide">
+                          Edit Flag Reason with Audit Comment
+                        </label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            required
+                            placeholder="State updated reason why this transaction is being flagged..."
+                            value={editFlagReasonText}
+                            onChange={(e) => setEditFlagReasonText(e.target.value)}
+                            className="flex-1 px-3 py-1.5 border border-slate-200 dark:border-slate-800 rounded-lg text-xs bg-white dark:bg-slate-950 focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-850 dark:text-slate-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleEditFlagReason(exp)}
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs px-3 rounded-lg flex items-center justify-center transition cursor-pointer whitespace-nowrap"
+                          >
+                            Save Updates
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setActiveEditFlagInputId(null); setEditFlagReasonText(''); }}
+                            className="text-gray-400 hover:text-gray-600 text-xs px-2 cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Interactive Collapsible Flag History logs (Audit Trail) */}
+                    {activeHistoryId === exp.id && exp.flagHistory && exp.flagHistory.length > 0 && (
+                      <div className="mt-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-200/55 dark:border-slate-850 space-y-2">
+                        <span className="text-[9px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest flex items-center gap-1.5">
+                          <History className="w-3.5 h-3.5" /> Flagging & Resolution Change Logs (Audit Trail)
+                        </span>
+                        <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                          {exp.flagHistory.map((h, hIdx) => (
+                            <div key={hIdx} className="text-[10px] flex flex-col border-b border-slate-100 dark:border-slate-800/65 pb-1.5 last:border-none">
+                              <div className="flex justify-between items-center mb-0.5">
+                                <span className={`font-bold px-1.5 py-0.2 rounded text-[8px] uppercase tracking-wide ${
+                                  h.type === 'flag' 
+                                    ? 'bg-amber-100 text-amber-750 dark:bg-amber-950/65 dark:text-amber-400' 
+                                    : 'bg-emerald-100 text-emerald-755 dark:bg-emerald-950/65 dark:text-emerald-400'
+                                }`}>
+                                  {h.type === 'flag' ? 'Flagged' : 'Resolved'}
+                                </span>
+                                <span className="text-gray-400 text-[9px]">{new Date(h.timestamp).toLocaleString()}</span>
+                              </div>
+                              <span className="text-gray-700 dark:text-slate-300 italic">"{h.comment}"</span>
+                              <span className="text-gray-400 text-[9px] self-end mt-0.5">— {h.authorName}</span>
                             </div>
                           ))}
                         </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <span className={`font-bold font-mono ${isDeleted ? 'text-rose-800 dark:text-rose-400 line-through' : 'text-slate-900 dark:text-slate-100'}`}>
-                          {exp.currency} {Number(exp.amount).toFixed(2)}
-                        </span>
-                        <p className="text-[9px] text-gray-400 font-medium uppercase mt-0.5">
-                          {exp.splitMethod === 'equal' ? 'Split Equally' : exp.splitMethod === 'exact' ? 'Exact Allocation' : 'Proportional Shares'}
-                        </p>
                       </div>
-
-                      {!isDeleted && showDelete && onUpdateExpense && (
-                        <button
-                          type="button"
-                          onClick={() => setEditingExpense(exp)}
-                          title="Modify transaction details"
-                          className="text-gray-400 hover:text-indigo-650 transition opacity-0 group-hover:opacity-100 mr-1 cursor-pointer"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                      )}
-                      {!isDeleted && showDelete && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfirmDialog({
-                              isOpen: true,
-                              title: 'Delete Expense',
-                              message: `Are you sure you want to delete this expense of ${exp.currency} ${Number(exp.amount).toFixed(2)} for "${exp.description}"? This will move it to the audit log trail and adjust group total calculations.`,
-                              type: 'danger',
-                              onConfirm: () => {
-                                setConfirmDialog(null);
-                                onDeleteExpense(exp.id, exp.amount);
-                              }
-                            });
-                          }}
-                          className="text-gray-400 hover:text-red-500 transition opacity-0 group-hover:opacity-100 cursor-pointer"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
+                    )}
                   </div>
                 );
               })}
@@ -1815,6 +2353,13 @@ export default function GroupDetail({
           type={confirmDialog.type}
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
+        />
+      )}
+
+      {historyModalExpense && (
+        <FlagHistoryModal
+          expense={historyModalExpense}
+          onClose={() => setHistoryModalExpense(null)}
         />
       )}
     </div>
