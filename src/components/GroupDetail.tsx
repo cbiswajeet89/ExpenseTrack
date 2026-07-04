@@ -98,11 +98,49 @@ export default function GroupDetail({
   const [minimizedCards, setMinimizedCards] = useState<{ [cardKey: string]: boolean }>(() => {
     try {
       const stored = localStorage.getItem(`minimizedCards_${group.id}`);
-      return stored ? JSON.parse(stored) : {};
+      return stored ? JSON.parse(stored) : {
+        header: true,
+        form: false,
+        ledger: true,
+        invite: true,
+        report: true,
+        log: false
+      };
     } catch {
-      return {};
+      return {
+        header: true,
+        form: false,
+        ledger: true,
+        invite: true,
+        report: true,
+        log: false
+      };
     }
   });
+
+  // Load minimized card state when group.id changes
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`minimizedCards_${group.id}`);
+      setMinimizedCards(stored ? JSON.parse(stored) : {
+        header: true,
+        form: false,
+        ledger: true,
+        invite: true,
+        report: true,
+        log: false
+      });
+    } catch {
+      setMinimizedCards({
+        header: true,
+        form: false,
+        ledger: true,
+        invite: true,
+        report: true,
+        log: false
+      });
+    }
+  }, [group.id]);
 
   const toggleCardMinimize = (cardKey: string) => {
     setMinimizedCards(prev => {
@@ -456,15 +494,94 @@ export default function GroupDetail({
     discountValue?: number;
     discountedAmount?: number;
     finalAmount?: number;
+    splitMethod?: SplitMethod;
+    splits?: ExpenseSplit[];
+    splitMembers?: string[];
+    splitExacts?: { [userId: string]: string };
+    splitShares?: { [userId: string]: string };
   }>>([]);
   const [newItemDesc, setNewItemDesc] = useState('');
   const [newItemAmount, setNewItemAmount] = useState('');
   const [newItemDiscountType, setNewItemDiscountType] = useState<'none' | 'percentage' | 'amount'>('none');
   const [newItemDiscountValue, setNewItemDiscountValue] = useState('');
 
+  // Sub-item Splits & Editing States
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [newItemSplitMethod, setNewItemSplitMethod] = useState<'equal' | 'exact' | 'shares'>('equal');
+  const [newItemSplitMembers, setNewItemSplitMembers] = useState<string[]>([]);
+  const [newItemSplitExacts, setNewItemSplitExacts] = useState<{ [userId: string]: string }>({});
+  const [newItemSplitShares, setNewItemSplitShares] = useState<{ [userId: string]: string }>({});
+
+  // Sync sub-item split members with group members when active group changes
+  useEffect(() => {
+    setNewItemSplitMembers(group.members);
+  }, [group.id, group.members]);
+
+  const handleEditItem = (id: string) => {
+    const item = items.find(it => it.id === id);
+    if (!item) return;
+
+    setEditingItemId(item.id);
+    setNewItemDesc(item.description);
+    setNewItemAmount(String(item.amount));
+    setNewItemDiscountType(item.discountType || 'none');
+    setNewItemDiscountValue(item.discountValue !== undefined && item.discountValue !== 0 ? String(item.discountValue) : '');
+    setNewItemSplitMethod(item.splitMethod || 'equal');
+    setNewItemSplitMembers(item.splitMembers || group.members);
+    setNewItemSplitExacts(item.splitExacts || {});
+    setNewItemSplitShares(item.splitShares || {});
+  };
+
+  const handleCancelEditItem = () => {
+    setEditingItemId(null);
+    setNewItemDesc('');
+    setNewItemAmount('');
+    setNewItemDiscountType('none');
+    setNewItemDiscountValue('');
+    setNewItemSplitMethod('equal');
+    setNewItemSplitMembers(group.members);
+    setNewItemSplitExacts({});
+    setNewItemSplitShares({});
+  };
+
   // Overall Discount States
   const [overallDiscountType, setOverallDiscountType] = useState<'none' | 'percentage' | 'amount'>('none');
   const [overallDiscountValue, setOverallDiscountValue] = useState('');
+
+  // Aggregated splits from sub-items
+  const aggregatedSplits = useMemo(() => {
+    const sums: { [userId: string]: number } = {};
+    groupUsers.forEach(u => {
+      sums[u.id] = 0;
+    });
+
+    if (items.length === 0) return sums;
+
+    items.forEach(it => {
+      const itemSplits = it.splits || [];
+      if (itemSplits.length > 0) {
+        itemSplits.forEach(s => {
+          if (sums[s.userId] !== undefined) {
+            sums[s.userId] += s.amount;
+          } else {
+            sums[s.userId] = s.amount;
+          }
+        });
+      } else {
+        const itemFinalAmt = it.finalAmount !== undefined ? it.finalAmount : it.amount;
+        const splitAmt = Number((itemFinalAmt / groupUsers.length).toFixed(2));
+        let distributed = 0;
+        groupUsers.forEach((u, index) => {
+          const isLast = index === groupUsers.length - 1;
+          const actualAmt = isLast ? Number((itemFinalAmt - distributed).toFixed(2)) : splitAmt;
+          distributed += actualAmt;
+          sums[u.id] += actualAmt;
+        });
+      }
+    });
+
+    return sums;
+  }, [items, groupUsers]);
 
   // Flagging / Audit States
   const [activeFlagInputId, setActiveFlagInputId] = useState<string | null>(null);
@@ -605,29 +722,103 @@ export default function GroupDetail({
     }
 
     const finalAmt = Number(Math.max(0, origAmt - discAmt).toFixed(2));
-    const id = `it_${Math.random().toString(36).substr(2, 9)}`;
-    const updatedItems = [
-      ...items,
-      {
+
+    // Calculate individual item splits
+    const subSplits: ExpenseSplit[] = [];
+    const membersToSplit = newItemSplitMembers.length > 0 ? newItemSplitMembers : group.members;
+
+    if (newItemSplitMethod === 'equal') {
+      const splitAmt = Number((finalAmt / membersToSplit.length).toFixed(2));
+      let distributed = 0;
+      membersToSplit.forEach((userId, index) => {
+        const isLast = index === membersToSplit.length - 1;
+        const actualAmt = isLast ? Number((finalAmt - distributed).toFixed(2)) : splitAmt;
+        distributed += actualAmt;
+        subSplits.push({ userId, amount: actualAmt });
+      });
+    } else if (newItemSplitMethod === 'exact') {
+      membersToSplit.forEach(userId => {
+        const val = parseFloat(newItemSplitExacts[userId]) || 0;
+        subSplits.push({ userId, amount: Number(val.toFixed(2)) });
+      });
+    } else if (newItemSplitMethod === 'shares') {
+      let totalShares = 0;
+      membersToSplit.forEach(userId => {
+        const val = parseInt(newItemSplitShares[userId]) || 1;
+        totalShares += val;
+      });
+
+      let distributed = 0;
+      membersToSplit.forEach((userId, index) => {
+        const userShare = parseInt(newItemSplitShares[userId]) || 1;
+        const isLast = index === membersToSplit.length - 1;
+        const actualAmt = isLast
+          ? Number((finalAmt - distributed).toFixed(2))
+          : Number(((userShare / totalShares) * finalAmt).toFixed(2));
+        distributed += actualAmt;
+        subSplits.push({ userId, amount: actualAmt, share: userShare });
+      });
+    }
+
+    let updatedItems;
+    if (editingItemId) {
+      updatedItems = items.map(it => {
+        if (it.id === editingItemId) {
+          return {
+            id: it.id,
+            description: newItemDesc.trim(),
+            amount: origAmt,
+            discountType: newItemDiscountType,
+            discountValue: discVal,
+            discountedAmount: discAmt,
+            finalAmount: finalAmt,
+            splitMethod: newItemSplitMethod,
+            splits: subSplits,
+            splitMembers: newItemSplitMembers,
+            splitExacts: newItemSplitExacts,
+            splitShares: newItemSplitShares
+          };
+        }
+        return it;
+      });
+      setEditingItemId(null);
+    } else {
+      const id = `it_${Math.random().toString(36).substr(2, 9)}`;
+      const newItem = {
         id,
         description: newItemDesc.trim(),
         amount: origAmt,
         discountType: newItemDiscountType,
         discountValue: discVal,
         discountedAmount: discAmt,
-        finalAmount: finalAmt
-      }
-    ];
+        finalAmount: finalAmt,
+        splitMethod: newItemSplitMethod,
+        splits: subSplits,
+        splitMembers: newItemSplitMembers,
+        splitExacts: newItemSplitExacts,
+        splitShares: newItemSplitShares
+      };
+      updatedItems = [...items, newItem];
+    }
+
     setItems(updatedItems);
     
     // Automatically recalculate total amount based on itemized entries
     const sum = updatedItems.reduce((acc, curr) => acc + (curr.finalAmount !== undefined ? curr.finalAmount : curr.amount), 0);
     setAmount(sum.toFixed(2));
+
+    // Nullify overall discount
+    setOverallDiscountType('none');
+    setOverallDiscountValue('');
     
     setNewItemDesc('');
     setNewItemAmount('');
     setNewItemDiscountType('none');
     setNewItemDiscountValue('');
+    setNewItemSplitMethod('equal');
+    setNewItemSplitMembers(group.members);
+    setNewItemSplitExacts({});
+    setNewItemSplitShares({});
   };
 
   const handleRemoveItem = (id: string) => {
@@ -635,6 +826,9 @@ export default function GroupDetail({
     setItems(updatedItems);
     const sum = updatedItems.reduce((acc, curr) => acc + (curr.finalAmount !== undefined ? curr.finalAmount : curr.amount), 0);
     setAmount(sum.toFixed(2));
+    if (editingItemId === id) {
+      setEditingItemId(null);
+    }
   };
 
   // Submit Expense split logging (incorporates overall discount and splits on final price)
@@ -654,47 +848,84 @@ export default function GroupDetail({
 
     const finalAmount = Number(Math.max(0, baseAmount - overallDiscAmt).toFixed(2));
 
-    // Build the splits depending on chosen method
+    // Build the splits depending on chosen method, or aggregate from sub-items if present
     const splits: ExpenseSplit[] = [];
 
-    if (splitMethod === 'equal') {
-      const splitAmt = Number((finalAmount / groupUsers.length).toFixed(2));
-      let distributed = 0;
-      groupUsers.forEach((u, index) => {
-        const isLast = index === groupUsers.length - 1;
-        const actualAmt = isLast ? Number((finalAmount - distributed).toFixed(2)) : splitAmt;
-        distributed += actualAmt;
-        splits.push({ userId: u.id, amount: actualAmt });
-      });
-    } else if (splitMethod === 'exact') {
-      let sumExact = 0;
+    if (items.length > 0) {
+      const userSums: { [userId: string]: number } = {};
       groupUsers.forEach(u => {
-        const val = parseFloat(exactAmounts[u.id]) || 0;
-        sumExact += val;
-        splits.push({ userId: u.id, amount: Number(val.toFixed(2)) });
+        userSums[u.id] = 0;
       });
 
-      if (Math.abs(sumExact - finalAmount) > 0.05) {
-        alert(`Exact splits must sum to the final discounted total amount of ${finalAmount}. Current sum is ${sumExact}.`);
-        return;
+      items.forEach(it => {
+        const itemSplits = it.splits || [];
+        if (itemSplits.length > 0) {
+          itemSplits.forEach(s => {
+            if (userSums[s.userId] !== undefined) {
+              userSums[s.userId] += s.amount;
+            } else {
+              userSums[s.userId] = s.amount;
+            }
+          });
+        } else {
+          // Fallback: split equally among all groupUsers
+          const splitAmt = Number(((it.finalAmount || it.amount) / groupUsers.length).toFixed(2));
+          let distributed = 0;
+          groupUsers.forEach((u, index) => {
+            const isLast = index === groupUsers.length - 1;
+            const actualAmt = isLast ? Number(((it.finalAmount || it.amount) - distributed).toFixed(2)) : splitAmt;
+            distributed += actualAmt;
+            userSums[u.id] += actualAmt;
+          });
+        }
+      });
+
+      groupUsers.forEach(u => {
+        splits.push({
+          userId: u.id,
+          amount: Number(userSums[u.id].toFixed(2))
+        });
+      });
+    } else {
+      if (splitMethod === 'equal') {
+        const splitAmt = Number((finalAmount / groupUsers.length).toFixed(2));
+        let distributed = 0;
+        groupUsers.forEach((u, index) => {
+          const isLast = index === groupUsers.length - 1;
+          const actualAmt = isLast ? Number((finalAmount - distributed).toFixed(2)) : splitAmt;
+          distributed += actualAmt;
+          splits.push({ userId: u.id, amount: actualAmt });
+        });
+      } else if (splitMethod === 'exact') {
+        let sumExact = 0;
+        groupUsers.forEach(u => {
+          const val = parseFloat(exactAmounts[u.id]) || 0;
+          sumExact += val;
+          splits.push({ userId: u.id, amount: Number(val.toFixed(2)) });
+        });
+
+        if (Math.abs(sumExact - finalAmount) > 0.05) {
+          alert(`Exact splits must sum to the final discounted total amount of ${finalAmount}. Current sum is ${sumExact}.`);
+          return;
+        }
+      } else if (splitMethod === 'shares') {
+        let totalShares = 0;
+        groupUsers.forEach(u => {
+          const val = parseInt(shares[u.id]) || 1;
+          totalShares += val;
+        });
+
+        let distributed = 0;
+        groupUsers.forEach((u, index) => {
+          const userShare = parseInt(shares[u.id]) || 1;
+          const isLast = index === groupUsers.length - 1;
+          const actualAmt = isLast 
+            ? Number((finalAmount - distributed).toFixed(2)) 
+            : Number(((userShare / totalShares) * finalAmount).toFixed(2));
+          distributed += actualAmt;
+          splits.push({ userId: u.id, amount: actualAmt, share: userShare });
+        });
       }
-    } else if (splitMethod === 'shares') {
-      let totalShares = 0;
-      groupUsers.forEach(u => {
-        const val = parseInt(shares[u.id]) || 1;
-        totalShares += val;
-      });
-
-      let distributed = 0;
-      groupUsers.forEach((u, index) => {
-        const userShare = parseInt(shares[u.id]) || 1;
-        const isLast = index === groupUsers.length - 1;
-        const actualAmt = isLast 
-          ? Number((finalAmount - distributed).toFixed(2)) 
-          : Number(((userShare / totalShares) * finalAmount).toFixed(2));
-        distributed += actualAmt;
-        splits.push({ userId: u.id, amount: actualAmt, share: userShare });
-      });
     }
 
     const payload: Omit<Expense, 'id' | 'createdAt'> = {
@@ -704,7 +935,7 @@ export default function GroupDetail({
       currency: group.currency,
       date,
       paidBy,
-      splitMethod,
+      splitMethod: items.length > 0 ? 'exact' : splitMethod, // Set to exact if itemized splits are aggregated
       splits,
       items: items.map(it => ({
         id: it.id,
@@ -713,7 +944,9 @@ export default function GroupDetail({
         discountType: it.discountType || 'none',
         discountValue: it.discountValue || 0,
         discountedAmount: it.discountedAmount || 0,
-        finalAmount: it.finalAmount !== undefined ? it.finalAmount : it.amount
+        finalAmount: it.finalAmount !== undefined ? it.finalAmount : it.amount,
+        splitMethod: it.splitMethod || 'equal',
+        splits: it.splits || []
       })),
       category,
       discountType: overallDiscountType,
@@ -931,7 +1164,14 @@ export default function GroupDetail({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Amount ({group.currency})</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1 flex justify-between items-center">
+                    <span>Amount ({group.currency})</span>
+                    {items.length > 0 && (
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium italic">
+                        Calculated from sub-items
+                      </span>
+                    )}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -939,7 +1179,9 @@ export default function GroupDetail({
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="0.00"
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    disabled={items.length > 0}
+                    className={`w-full px-3 py-2 border border-gray-200 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 ${items.length > 0 ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-not-allowed' : ''}`}
+                    title={items.length > 0 ? 'Amount is calculated from sub-items' : ''}
                   />
                 </div>
               </div>
@@ -1019,38 +1261,80 @@ export default function GroupDetail({
 
                 {items.length > 0 && (
                   <div className="space-y-1.5 mb-3">
-                    {items.map((it) => (
-                      <div key={it.id} className="flex items-center justify-between text-xs bg-white dark:bg-slate-950 border border-gray-100 dark:border-slate-850 px-3 py-1.5 rounded-xl">
-                        <div className="flex flex-col">
-                          <span className="font-medium text-gray-700 dark:text-slate-300">{it.description}</span>
-                          {it.discountType && it.discountType !== 'none' && (
-                            <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
-                              Discount: {it.discountType === 'percentage' ? `${it.discountValue}%` : `${group.currency} ${Number(it.discountValue).toFixed(2)}`} (-{group.currency} {Number(it.discountedAmount).toFixed(2)})
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            {it.discountType && it.discountType !== 'none' ? (
-                              <>
-                                <span className="font-mono text-[10px] text-gray-400 dark:text-slate-500 line-through mr-1.5">{group.currency} {Number(it.amount).toFixed(2)}</span>
-                                <span className="font-mono font-semibold text-gray-900 dark:text-slate-200">{group.currency} {Number(it.finalAmount).toFixed(2)}</span>
-                              </>
-                            ) : (
-                              <span className="font-mono font-semibold text-gray-900 dark:text-slate-200">{group.currency} {Number(it.amount).toFixed(2)}</span>
-                            )}
+                    {items.map((it) => {
+                      const hasItemDisc = it.discountType && it.discountType !== 'none' && parseFloat(String(it.discountValue || '0')) > 0;
+                      return (
+                        <div key={it.id} className="flex flex-col text-xs bg-white dark:bg-slate-950 border border-gray-100 dark:border-slate-850 p-3 rounded-xl space-y-1">
+                          <div className="flex items-center justify-between">
+                            <div className="flex flex-col">
+                              <span className="font-medium text-gray-700 dark:text-slate-300">{it.description}</span>
+                              {hasItemDisc && (
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold">
+                                  Discount: {it.discountType === 'percentage' ? `${it.discountValue}%` : `${group.currency} ${Number(it.discountValue).toFixed(2)}`} (-{group.currency} {Number(it.discountedAmount).toFixed(2)})
+                                </span>
+                              )}
+                              {it.splits && it.splits.length > 0 && (
+                                <span className="text-[10px] text-indigo-500 dark:text-indigo-400 font-medium flex flex-wrap gap-x-1.5 gap-y-0.5 mt-0.5">
+                                  <strong className="uppercase text-[8px] bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 px-1 py-0.2 rounded-sm">{it.splitMethod || 'equal'}</strong>
+                                  {it.splits.map(s => {
+                                    const uName = groupUsers.find(u => u.id === s.userId)?.name || 'Unknown';
+                                    return `${uName}: ${group.currency}${s.amount.toFixed(2)}`;
+                                  }).join(', ')}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-right">
+                                {hasItemDisc ? (
+                                  <>
+                                    <span className="font-mono text-[10px] text-gray-400 dark:text-slate-500 line-through mr-1.5">{group.currency} {Number(it.amount).toFixed(2)}</span>
+                                    <span className="font-mono font-semibold text-gray-900 dark:text-slate-200">{group.currency} {Number(it.finalAmount).toFixed(2)}</span>
+                                  </>
+                                ) : (
+                                  <span className="font-mono font-semibold text-gray-900 dark:text-slate-200">{group.currency} {Number(it.amount).toFixed(2)}</span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleEditItem(it.id)}
+                                className="text-indigo-500 hover:text-indigo-600 p-1 rounded-md hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer"
+                                title="Edit this sub-item"
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveItem(it.id)}
+                                className="text-red-500 hover:text-red-600 p-1 rounded-md hover:bg-slate-50 dark:hover:bg-slate-850 cursor-pointer"
+                                title="Remove this sub-item"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </div>
-                          <button type="button" onClick={() => handleRemoveItem(it.id)} className="text-red-500 hover:text-red-600 cursor-pointer">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
-                <div className="flex flex-col gap-2 mt-2 bg-slate-100/50 dark:bg-slate-950/45 p-3 rounded-xl border border-slate-200/50 dark:border-slate-850">
-                  <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">Add New Sub-item</span>
+                <div className="flex flex-col gap-3 mt-3 bg-slate-100/50 dark:bg-slate-950/45 p-4 rounded-xl border border-slate-200/50 dark:border-slate-850">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide">
+                      {editingItemId ? '⚡ Editing Sub-item' : '📝 Add New Sub-item'}
+                    </span>
+                    {editingItemId && (
+                      <button
+                        type="button"
+                        onClick={handleCancelEditItem}
+                        className="text-[10px] text-rose-500 hover:underline cursor-pointer font-bold"
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Basic fields */}
                   <div className="flex flex-wrap gap-2">
                     <input
                       type="text"
@@ -1069,8 +1353,11 @@ export default function GroupDetail({
                     />
                     <select
                       value={newItemDiscountType}
-                      onChange={(e) => setNewItemDiscountType(e.target.value as 'none' | 'percentage' | 'amount')}
-                      className="px-2.5 py-1.5 border border-gray-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 text-xs focus:outline-none text-slate-700 dark:text-slate-300"
+                      onChange={(e) => {
+                        setNewItemDiscountType(e.target.value as 'none' | 'percentage' | 'amount');
+                        if (e.target.value === 'none') setNewItemDiscountValue('');
+                      }}
+                      className="px-2.5 py-1.5 border border-gray-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 text-xs focus:outline-none text-slate-700 dark:text-slate-300 cursor-pointer"
                     >
                       <option value="none">No Discount</option>
                       <option value="percentage">Discount %</option>
@@ -1086,24 +1373,116 @@ export default function GroupDetail({
                         className="w-20 px-3 py-1.5 border border-gray-200 dark:border-slate-800 rounded-xl text-xs font-mono bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                       />
                     )}
-                    <button
-                      type="button"
-                      onClick={handleAddItem}
-                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-3 rounded-xl flex items-center justify-center transition shadow-md shadow-indigo-100 cursor-pointer"
-                    >
-                      Add Item
-                    </button>
+                  </div>
+
+                  {/* Sub-item Split Configurations */}
+                  <div className="space-y-2 border-t border-dashed border-slate-200 dark:border-slate-800 pt-2.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wide flex items-center gap-1">
+                        Split item among:
+                      </span>
+                      <select
+                        value={newItemSplitMethod}
+                        onChange={(e) => {
+                          setNewItemSplitMethod(e.target.value as 'equal' | 'exact' | 'shares');
+                        }}
+                        className="px-2 py-1 border border-gray-200 dark:border-slate-800 rounded-xl bg-white dark:bg-slate-950 text-[10px] focus:outline-none text-slate-700 dark:text-slate-300 cursor-pointer"
+                      >
+                        <option value="equal">Split Equally</option>
+                        <option value="exact">Exact Amounts</option>
+                        <option value="shares">By Shares</option>
+                      </select>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 bg-white dark:bg-slate-900/60 p-2.5 rounded-xl border border-slate-150 dark:border-slate-850">
+                      {groupUsers.map(u => {
+                        const isIncluded = newItemSplitMembers.includes(u.id);
+                        return (
+                          <div key={u.id} className="flex items-center gap-1.5 text-[11px] bg-slate-50 dark:bg-slate-950 px-2 py-1 rounded-lg border border-slate-100 dark:border-slate-850">
+                            <input
+                              type="checkbox"
+                              checked={isIncluded}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setNewItemSplitMembers([...newItemSplitMembers, u.id]);
+                                } else {
+                                  setNewItemSplitMembers(newItemSplitMembers.filter(id => id !== u.id));
+                                }
+                              }}
+                              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer"
+                            />
+                            <span className="font-medium text-slate-750 dark:text-slate-300">{u.name}</span>
+                            {isIncluded && newItemSplitMethod === 'exact' && (
+                              <input
+                                type="number"
+                                step="0.01"
+                                placeholder="0.00"
+                                value={newItemSplitExacts[u.id] || ''}
+                                onChange={(e) => {
+                                  setNewItemSplitExacts({ ...newItemSplitExacts, [u.id]: e.target.value });
+                                }}
+                                className="w-16 px-1 py-0.5 border border-slate-200 dark:border-slate-850 bg-white dark:bg-slate-950 font-mono text-[10px] text-right rounded focus:ring-1 focus:ring-indigo-500"
+                              />
+                            )}
+                            {isIncluded && newItemSplitMethod === 'shares' && (
+                              <input
+                                type="number"
+                                min="1"
+                                placeholder="1"
+                                value={newItemSplitShares[u.id] || ''}
+                                onChange={(e) => {
+                                  setNewItemSplitShares({ ...newItemSplitShares, [u.id]: e.target.value });
+                                }}
+                                className="w-10 px-1 py-0.5 border border-slate-200 dark:border-slate-850 bg-white dark:bg-slate-950 font-mono text-[10px] text-center rounded focus:ring-1 focus:ring-indigo-500"
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Submit Add/Update Subitem Button */}
+                    <div className="flex justify-between items-center pt-1.5">
+                      <div className="text-[10px] text-slate-400 font-medium">
+                        {(() => {
+                          const amt = parseFloat(newItemAmount) || 0;
+                          let dAmt = 0;
+                          const dVal = parseFloat(newItemDiscountValue) || 0;
+                          if (newItemDiscountType === 'percentage') {
+                            dAmt = (dVal / 100) * amt;
+                          } else if (newItemDiscountType === 'amount') {
+                            dAmt = dVal;
+                          }
+                          const final = Math.max(0, amt - dAmt);
+                          if (final > 0) {
+                            return (
+                              <span>
+                                Final Item Total: <strong className="font-mono text-slate-700 dark:text-slate-200">{group.currency} {final.toFixed(2)}</strong>
+                              </span>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddItem}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-1.5 rounded-xl transition shadow-md shadow-indigo-100 cursor-pointer"
+                      >
+                        {editingItemId ? 'Update Item' : 'Add Item'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Paid By</label>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-350 mb-1">Paid By</label>
                   <select
                     value={paidBy}
                     onChange={(e) => setPaidBy(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 dark:text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   >
                     {groupUsers.map(u => (
                       <option key={u.id} value={u.id}>{u.name}</option>
@@ -1112,24 +1491,38 @@ export default function GroupDetail({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Split Method</label>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-350 mb-1 flex justify-between items-center">
+                    <span>Split Method</span>
+                    {items.length > 0 && (
+                      <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-medium italic">
+                        Aggregated from items
+                      </span>
+                    )}
+                  </label>
                   <select
-                    value={splitMethod}
+                    value={items.length > 0 ? 'exact' : splitMethod}
                     onChange={(e) => setSplitMethod(e.target.value as SplitMethod)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    disabled={items.length > 0}
+                    className={`w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 dark:text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20 ${items.length > 0 ? 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 cursor-not-allowed' : ''}`}
                   >
-                    <option value="equal">Equal Split</option>
-                    <option value="exact">Exact Amounts</option>
-                    <option value="shares">Shares Proportional</option>
+                    {items.length > 0 ? (
+                      <option value="exact">Aggregated from Sub-items</option>
+                    ) : (
+                      <>
+                        <option value="equal">Equal Split</option>
+                        <option value="exact">Exact Amounts</option>
+                        <option value="shares">Shares Proportional</option>
+                      </>
+                    )}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">Category</label>
+                  <label className="block text-xs font-semibold text-gray-600 dark:text-slate-350 mb-1">Category</label>
                   <select
                     value={category}
                     onChange={(e) => setCategory(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-xl bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    className="w-full px-3 py-2 border border-gray-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 dark:text-slate-100 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
                   >
                     {categories.map(c => (
                       <option key={c} value={c}>{c}</option>
@@ -1139,44 +1532,70 @@ export default function GroupDetail({
               </div>
 
               {/* Split Allocations Custom Options depending on selectedMethod */}
-              {splitMethod === 'exact' && (
-                <div className="border border-indigo-50 bg-indigo-50/10 rounded-2xl p-4 space-y-3.5">
-                  <label className="block text-xs font-semibold text-indigo-700">Enter Exact Amounts for each member:</label>
-                  {groupUsers.map(u => (
-                    <div key={u.id} className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-gray-700">{u.name}</span>
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-gray-400">{group.currency}</span>
-                        <input
-                          type="number"
-                          placeholder="0.00"
-                          value={exactAmounts[u.id] || ''}
-                          onChange={(e) => setExactAmounts({ ...exactAmounts, [u.id]: e.target.value })}
-                          className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-right text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
-                        />
-                      </div>
-                    </div>
-                  ))}
+              {items.length > 0 ? (
+                <div className="border border-indigo-50 bg-indigo-50/10 dark:border-indigo-950/20 dark:bg-indigo-950/5 rounded-2xl p-4 space-y-3">
+                  <label className="block text-xs font-semibold text-indigo-700 dark:text-indigo-400 flex justify-between items-center">
+                    <span>Calculated Roommate Splits (Read-only):</span>
+                    <span className="text-[9px] bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-300 px-2 py-0.5 rounded-md uppercase font-bold font-mono">
+                      Sub-items Aggregated
+                    </span>
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {groupUsers.map(u => {
+                      const amtVal = aggregatedSplits[u.id] || 0;
+                      return (
+                        <div key={u.id} className="flex items-center justify-between text-xs bg-white dark:bg-slate-950 border border-slate-100 dark:border-slate-850 px-3 py-2 rounded-xl">
+                          <span className="font-medium text-gray-700 dark:text-slate-300">{u.name}</span>
+                          <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                            {group.currency} {amtVal.toFixed(2)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
+              ) : (
+                <>
+                  {splitMethod === 'exact' && (
+                    <div className="border border-indigo-50 bg-indigo-50/10 rounded-2xl p-4 space-y-3.5">
+                      <label className="block text-xs font-semibold text-indigo-700">Enter Exact Amounts for each member:</label>
+                      {groupUsers.map(u => (
+                        <div key={u.id} className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-gray-700">{u.name}</span>
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono text-gray-400">{group.currency}</span>
+                            <input
+                              type="number"
+                              placeholder="0.00"
+                              value={exactAmounts[u.id] || ''}
+                              onChange={(e) => setExactAmounts({ ...exactAmounts, [u.id]: e.target.value })}
+                              className="w-24 px-2 py-1 border border-gray-200 rounded-lg text-right text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
 
-              {splitMethod === 'shares' && (
-                <div className="border border-indigo-50 bg-indigo-50/10 rounded-2xl p-4 space-y-3.5">
-                  <label className="block text-xs font-semibold text-indigo-700">Specify Shares counts (e.g. 1, 2):</label>
-                  {groupUsers.map(u => (
-                    <div key={u.id} className="flex items-center justify-between text-xs">
-                      <span className="font-medium text-gray-700">{u.name}</span>
-                      <input
-                        type="number"
-                        min="1"
-                        placeholder="1"
-                        value={shares[u.id] || ''}
-                        onChange={(e) => setShares({ ...shares, [u.id]: e.target.value })}
-                        className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-center text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
-                      />
+                  {splitMethod === 'shares' && (
+                    <div className="border border-indigo-50 bg-indigo-50/10 rounded-2xl p-4 space-y-3.5">
+                      <label className="block text-xs font-semibold text-indigo-700">Specify Shares counts (e.g. 1, 2):</label>
+                      {groupUsers.map(u => (
+                        <div key={u.id} className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-gray-700">{u.name}</span>
+                          <input
+                            type="number"
+                            min="1"
+                            placeholder="1"
+                            value={shares[u.id] || ''}
+                            onChange={(e) => setShares({ ...shares, [u.id]: e.target.value })}
+                            className="w-16 px-2 py-1 border border-gray-200 rounded-lg text-center text-xs font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-white"
+                          />
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
+                  )}
+                </>
               )}
 
               <button

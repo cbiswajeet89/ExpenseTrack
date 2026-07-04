@@ -88,9 +88,21 @@ export default function Dashboard({
   const [minimizedCards, setMinimizedCards] = useState<{ [cardKey: string]: boolean }>(() => {
     try {
       const stored = localStorage.getItem('dashboardMinimizedCards');
-      return stored ? JSON.parse(stored) : {};
+      return stored ? JSON.parse(stored) : {
+        settlements: true,
+        balances: true,
+        category_chart: true,
+        trend_chart: true,
+        recent_expenses: false
+      };
     } catch {
-      return {};
+      return {
+        settlements: true,
+        balances: true,
+        category_chart: true,
+        trend_chart: true,
+        recent_expenses: false
+      };
     }
   });
 

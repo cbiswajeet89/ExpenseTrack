@@ -53,6 +53,8 @@ export interface ExpenseItem {
   discountValue?: number;
   discountedAmount?: number;
   finalAmount?: number;
+  splitMethod?: SplitMethod;
+  splits?: ExpenseSplit[];
 }
 
 export interface Expense {

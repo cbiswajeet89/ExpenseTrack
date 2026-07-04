@@ -60,6 +60,7 @@ import {
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [jwtToken, setJwtToken] = useState('');
   const [groups, setGroups] = useState<Group[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -1122,8 +1123,49 @@ export default function App() {
                 >
                   {theme === 'light' ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
                 </button>
-                <div className="w-8 h-8 rounded-full bg-slate-100 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-650 dark:text-slate-300 font-bold uppercase text-xs">
-                  {currentUser.name.substring(0, 2)}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowProfileMenu(!showProfileMenu)}
+                    className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-slate-850 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-650 dark:text-slate-300 font-bold uppercase text-xs cursor-pointer transition focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                    title="User Settings"
+                  >
+                    {currentUser.name.substring(0, 2)}
+                  </button>
+                  
+                  {showProfileMenu && (
+                    <>
+                      <div 
+                        className="fixed inset-0 z-10" 
+                        onClick={() => setShowProfileMenu(false)}
+                      />
+                      <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 rounded-xl shadow-xl py-1.5 z-20 animate-in fade-in slide-in-from-top-1 duration-100">
+                        <div className="px-3 py-2 border-b border-slate-50 dark:border-slate-850">
+                          <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{currentUser.name}</p>
+                          <p className="text-[10px] text-slate-400 dark:text-slate-500 truncate">{currentUser.email}</p>
+                        </div>
+                        <button
+                          onClick={() => {
+                            setActiveTab('profile');
+                            setShowProfileMenu(false);
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 transition flex items-center gap-2 cursor-pointer border-0 bg-transparent"
+                        >
+                          <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+                          <span>My Profile</span>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowProfileMenu(false);
+                            handleLogout();
+                          }}
+                          className="w-full text-left px-3 py-2 text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/20 transition flex items-center gap-2 cursor-pointer border-0 bg-transparent"
+                        >
+                          <LogOut className="w-3.5 h-3.5 text-rose-500" />
+                          <span>Sign Out</span>
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
