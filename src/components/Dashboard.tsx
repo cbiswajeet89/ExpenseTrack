@@ -61,6 +61,8 @@ interface DashboardProps {
   onUpdateExpense?: (expenseId: string, updatedExpense: Omit<Expense, 'id' | 'createdAt'>, oldAmount: number) => Promise<void>;
   onDeleteExpense?: (expenseId: string, amount: number) => Promise<void>;
   categories?: string[];
+  selectedGroupId: string | null;
+  selectedCurrency: string;
 }
 
 export default function Dashboard({ 
@@ -71,20 +73,12 @@ export default function Dashboard({
   currencyRates,
   onUpdateExpense,
   onDeleteExpense,
-  categories: propCategories
+  categories: propCategories,
+  selectedGroupId,
+  selectedCurrency
 }: DashboardProps) {
-  // Currency switcher state
-  const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('selectedCurrency') || 'INR');
-
-  const handleCurrencyChange = (currCode: string) => {
-    setSelectedCurrency(currCode);
-    localStorage.setItem('selectedCurrency', currCode);
-  };
-
-  // Selected Group state for Dashboard scoping
-  const [activeGroupId, setActiveGroupId] = useState<string>('');
-  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(() => localStorage.getItem('isDashboardToolbarCollapsed') === 'true');
-
+  // Selected Group derived from parent
+  const activeGroupId = selectedGroupId || '';
   const [minimizedCards, setMinimizedCards] = useState<{ [cardKey: string]: boolean }>(() => {
     try {
       const stored = localStorage.getItem('dashboardMinimizedCards');
@@ -142,13 +136,6 @@ export default function Dashboard({
     );
   };
 
-  const toggleToolbarCollapse = () => {
-    setIsToolbarCollapsed(prev => {
-      const next = !prev;
-      localStorage.setItem('isDashboardToolbarCollapsed', String(next));
-      return next;
-    });
-  };
   const [settlementFilter, setSettlementFilter] = useState<'all' | 'me'>('me');
   const [dashboardExpenses, setDashboardExpenses] = useState<Expense[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
@@ -263,15 +250,6 @@ export default function Dashboard({
       console.error('Error updating flag reason:', err);
     }
   };
-
-  // Initialize group selection
-  useEffect(() => {
-    if (groups.length > 0 && !activeGroupId) {
-      // Find default group to pre-select
-      const preseeded = groups.find(g => g.id === 'grp_apartment_3b');
-      setActiveGroupId(preseeded ? preseeded.id : groups[0].id);
-    }
-  }, [groups, activeGroupId]);
 
   const [showDeleted, setShowDeleted] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -648,81 +626,6 @@ export default function Dashboard({
 
   return (
     <div className="space-y-6 font-sans">
-      {/* TOOLBAR CONTROLS */}
-      {isToolbarCollapsed ? (
-        <div className="flex items-center justify-between gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-850 px-4 py-3 rounded-2xl transition-all duration-350">
-          <div className="flex items-center gap-3">
-            <Filter className="w-4 h-4 text-indigo-500 shrink-0" />
-            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Active Room:</span>
-              <span className="text-xs font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-150 dark:border-slate-750 shadow-2xs">
-                {activeGroup?.name || 'No Active Room'}
-              </span>
-              <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider ml-1">Dashboard Currency:</span>
-              <span className="text-xs font-mono font-bold text-slate-800 dark:text-slate-100 bg-white dark:bg-slate-800 px-2.5 py-1 rounded-lg border border-slate-150 dark:border-slate-750 shadow-2xs flex items-center gap-1">
-                <Coins className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
-                {selectedCurrency}
-              </span>
-            </div>
-          </div>
-          <button
-            onClick={toggleToolbarCollapse}
-            className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-indigo-650 dark:text-indigo-400 hover:text-white hover:bg-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 rounded-lg transition-all cursor-pointer"
-            title="Expand filter toolbar"
-          >
-            <span>Expand Toolbar</span>
-            <ChevronDown className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      ) : (
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-50 dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-4 rounded-2xl relative transition-all duration-350">
-          <div className="flex flex-col md:flex-row md:items-center gap-4 w-full md:w-auto">
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Select Shared Room:</span>
-              <select
-                value={activeGroupId}
-                onChange={(e) => setActiveGroupId(e.target.value)}
-                className="px-3 py-1.5 border border-slate-250 dark:border-slate-700 bg-white dark:bg-slate-850 rounded-xl text-xs font-semibold text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Coins className="w-4 h-4 text-indigo-600 dark:text-indigo-400 animate-pulse" />
-              <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Convert Workspace to:</span>
-              <div className="flex bg-slate-200/50 dark:bg-slate-800 p-0.5 rounded-xl border border-slate-150 dark:border-slate-750 gap-0.5">
-                {Object.keys(currencyRates).map((currCode) => (
-                  <button
-                    key={currCode}
-                    onClick={() => handleCurrencyChange(currCode)}
-                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg uppercase transition cursor-pointer ${
-                      selectedCurrency === currCode
-                        ? 'bg-white dark:bg-slate-700 text-indigo-700 dark:text-indigo-300 shadow-xs border border-indigo-100/50 dark:border-indigo-900/30'
-                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                    }`}
-                  >
-                    {currCode}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <button
-            onClick={toggleToolbarCollapse}
-            className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold text-slate-500 hover:text-white hover:bg-slate-650 bg-slate-100 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 rounded-lg transition-all self-end md:self-auto cursor-pointer"
-            title="Collapse toolbar"
-          >
-            <span>Collapse</span>
-            <ChevronUp className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
       {/* Overview Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-100 dark:border-slate-850 shadow-sm flex items-center justify-between">

@@ -35,14 +35,7 @@ export default function SettlementMatrix({
   onSelectGroup
 }: SettlementMatrixProps) {
   // Select active group for settlement matrix view
-  const [activeGroupId, setActiveGroupId] = useState<string>(selectedGroupId || groups[0]?.id || '');
-
-  // Sync active group with selectedGroupId from parent
-  React.useEffect(() => {
-    if (selectedGroupId) {
-      setActiveGroupId(selectedGroupId);
-    }
-  }, [selectedGroupId]);
+  const activeGroupId = selectedGroupId || '';
 
   // Map of userId to User object for easy lookup
   const userMap = useMemo(() => {
@@ -54,13 +47,6 @@ export default function SettlementMatrix({
   // Selected Group
   const selectedGroup = useMemo(() => {
     return groups.find(g => g.id === activeGroupId) || null;
-  }, [groups, activeGroupId]);
-
-  // Sync active group if groups list updates or active group is deleted
-  React.useEffect(() => {
-    if (groups.length > 0 && !groups.some(g => g.id === activeGroupId)) {
-      setActiveGroupId(groups[0].id);
-    }
   }, [groups, activeGroupId]);
 
   // Filter active expenses of current group
@@ -225,27 +211,6 @@ export default function SettlementMatrix({
             <p className="text-xs text-gray-400 dark:text-slate-500 mt-0.5">
               Visualize net peer-to-peer debts and simplified settlement flows for roommates.
             </p>
-          </div>
-
-          <div className="w-full sm:w-64">
-            <label className="block text-[10px] font-bold text-gray-400 dark:text-slate-500 uppercase tracking-wide mb-1.5">
-              Select Ledger Room
-            </label>
-            <select
-              value={activeGroupId}
-              onChange={(e) => {
-                const newId = e.target.value;
-                setActiveGroupId(newId);
-                if (onSelectGroup) {
-                  onSelectGroup(newId);
-                }
-              }}
-              className="w-full px-3 py-2 border border-slate-200 dark:border-slate-700 rounded-xl bg-white dark:bg-slate-950 text-xs text-slate-800 dark:text-slate-150 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
-            >
-              {groups.map(g => (
-                <option key={g.id} value={g.id}>{g.name} ({g.currency})</option>
-              ))}
-            </select>
           </div>
         </div>
       </div>
